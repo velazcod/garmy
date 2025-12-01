@@ -37,17 +37,33 @@ class SyncManager:
         self.api_client = None
         self.activities_iterator = None
 
-    def initialize(self, email: str, password: str):
-        """Initialize with Garmin credentials."""
+    def initialize(self, email: Optional[str] = None, password: Optional[str] = None):
+        """Initialize with Garmin credentials or saved tokens.
+
+        Args:
+            email: Garmin account email (optional if tokens are saved)
+            password: Garmin account password (optional if tokens are saved)
+        """
         try:
             from garmy import AuthClient, APIClient
 
             auth_client = AuthClient()
-            auth_client.login(
-                email,
-                password,
-                prompt_mfa=lambda: input("MFA code: "),
-            )
+
+            # Check if already authenticated with saved tokens
+            if not auth_client.is_authenticated:
+                if auth_client.needs_refresh:
+                    self.progress.info("Refreshing authentication tokens...")
+                    auth_client.refresh_tokens()
+                elif email and password:
+                    auth_client.login(
+                        email,
+                        password,
+                        prompt_mfa=lambda: input("MFA code: "),
+                    )
+                else:
+                    raise RuntimeError(
+                        "No valid saved tokens found. Please provide email and password."
+                    )
 
             self.api_client = APIClient(auth_client=auth_client)
 
