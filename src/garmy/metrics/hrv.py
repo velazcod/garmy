@@ -75,8 +75,8 @@ def parse_hrv_data(data: Dict[str, Any]) -> "HRV":
         )
 
     # Parse HRV summary
-    hrv_summary_data = snake_dict.get("hrv_summary", {})
-    baseline_data = hrv_summary_data.get("baseline", {})
+    hrv_summary_data = snake_dict.get("hrv_summary") or {}
+    baseline_data = hrv_summary_data.get("baseline") or {}
 
     baseline = HRVBaseline(
         low_upper=baseline_data.get("low_upper", 0),

@@ -66,25 +66,43 @@ class DataExtractor:
         }
     
     def _extract_sleep_data(self, data: Any) -> Dict[str, Any]:
-        """Extract sleep data from Sleep object - use the properties, stupid!"""
-        return {
+        """Extract sleep data from Sleep object."""
+        result = {
             # Use the built-in properties from Sleep class
             'sleep_duration_hours': getattr(data, 'sleep_duration_hours', None),
             'deep_sleep_percentage': getattr(data, 'deep_sleep_percentage', None),
             'light_sleep_percentage': getattr(data, 'light_sleep_percentage', None),
             'rem_sleep_percentage': getattr(data, 'rem_sleep_percentage', None),
             'awake_percentage': getattr(data, 'awake_percentage', None),
-            
-            # Calculate hours from the summary if available
-            'deep_sleep_hours': getattr(data.sleep_summary, 'deep_sleep_seconds', 0) / 3600 if hasattr(data, 'sleep_summary') and data.sleep_summary and getattr(data.sleep_summary, 'deep_sleep_seconds', 0) > 0 else None,
-            'light_sleep_hours': getattr(data.sleep_summary, 'light_sleep_seconds', 0) / 3600 if hasattr(data, 'sleep_summary') and data.sleep_summary and getattr(data.sleep_summary, 'light_sleep_seconds', 0) > 0 else None,
-            'rem_sleep_hours': getattr(data.sleep_summary, 'rem_sleep_seconds', 0) / 3600 if hasattr(data, 'sleep_summary') and data.sleep_summary and getattr(data.sleep_summary, 'rem_sleep_seconds', 0) > 0 else None,
-            'awake_hours': getattr(data.sleep_summary, 'awake_sleep_seconds', 0) / 3600 if hasattr(data, 'sleep_summary') and data.sleep_summary and getattr(data.sleep_summary, 'awake_sleep_seconds', 0) > 0 else None,
-            
-            # Physiological data from summary
-            'average_spo2': getattr(data.sleep_summary, 'average_sp_o2_value', None) if hasattr(data, 'sleep_summary') and data.sleep_summary else None,
-            'average_respiration': getattr(data.sleep_summary, 'average_respiration_value', None) if hasattr(data, 'sleep_summary') and data.sleep_summary else None
+            'deep_sleep_hours': None,
+            'light_sleep_hours': None,
+            'rem_sleep_hours': None,
+            'awake_hours': None,
+            'average_spo2': None,
+            'average_respiration': None,
         }
+
+        # Extract from sleep_summary if available
+        if hasattr(data, 'sleep_summary') and data.sleep_summary:
+            summary = data.sleep_summary
+            deep = getattr(summary, 'deep_sleep_seconds', None)
+            light = getattr(summary, 'light_sleep_seconds', None)
+            rem = getattr(summary, 'rem_sleep_seconds', None)
+            awake = getattr(summary, 'awake_sleep_seconds', None)
+
+            if deep and deep > 0:
+                result['deep_sleep_hours'] = deep / 3600
+            if light and light > 0:
+                result['light_sleep_hours'] = light / 3600
+            if rem and rem > 0:
+                result['rem_sleep_hours'] = rem / 3600
+            if awake and awake > 0:
+                result['awake_hours'] = awake / 3600
+
+            result['average_spo2'] = getattr(summary, 'average_sp_o2_value', None)
+            result['average_respiration'] = getattr(summary, 'average_respiration_value', None)
+
+        return result
     
     def _extract_heart_rate_summary(self, data: Any) -> Dict[str, Any]:
         """Extract heart rate summary data."""
