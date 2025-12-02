@@ -104,7 +104,9 @@ class SyncManager:
         if metrics is None:
             metrics = list(MetricType)
 
+        # Separate activities from other metrics - they need different iteration order
         non_activities_metrics = [m for m in metrics if m != MetricType.ACTIVITIES]
+        has_activities = MetricType.ACTIVITIES in metrics
         total_tasks = date_count * len(metrics)
 
         self.progress.start_sync(total_tasks)
@@ -112,13 +114,26 @@ class SyncManager:
         stats = {'completed': 0, 'skipped': 0, 'failed': 0, 'total_tasks': total_tasks}
 
         try:
+            # Create sync status entries for all dates
             for current_date in self._date_range(start_date, end_date):
                 for metric_type in metrics:
                     if not self.db.sync_status_exists(user_id, current_date, metric_type):
                         self.db.create_sync_status(user_id, current_date, metric_type, 'pending')
-            
-            for current_date in self._date_range(start_date, end_date):
-                self._sync_date(user_id, current_date, metrics, stats)
+
+            # Sync non-activities metrics (oldest to newest is fine)
+            if non_activities_metrics:
+                for current_date in self._date_range(start_date, end_date):
+                    self._sync_date(user_id, current_date, non_activities_metrics, stats)
+
+            # Sync activities separately in REVERSE order (newest to oldest)
+            # This matches the ActivitiesIterator which returns activities newest-first
+            if has_activities:
+                # Reset iterator to ensure fresh state for this sync
+                if self.activities_iterator:
+                    self.activities_iterator.reset()
+                # Use end_date to start_date order for activities
+                for current_date in self._date_range(end_date, start_date):
+                    self._sync_activities_for_date(user_id, current_date, stats)
 
         except Exception as e:
             raise
@@ -128,14 +143,14 @@ class SyncManager:
         return stats
 
     def _sync_date(self, user_id: int, sync_date: date, metrics: List[MetricType], stats: Dict[str, int]):
-        """Sync all metrics for a single date."""
+        """Sync all non-activities metrics for a single date.
+
+        Note: Activities are handled separately in sync_range() because they
+        require reverse date iteration to match the ActivitiesIterator.
+        """
         for metric_type in metrics:
             try:
-                if metric_type == MetricType.ACTIVITIES:
-                    self._sync_activities_for_date(user_id, sync_date, stats)
-                else:
-                    self._sync_metric_for_date(user_id, sync_date, metric_type, stats)
-
+                self._sync_metric_for_date(user_id, sync_date, metric_type, stats)
             except Exception as e:
                 self.db.update_sync_status(user_id, sync_date, metric_type, 'failed', str(e))
                 self.progress.task_failed(f"{metric_type.value}", sync_date)
@@ -208,11 +223,100 @@ class SyncManager:
                 self.db.store_activity(user_id, activity_data)
                 stats['completed'] += 1
 
+                # Fetch and store activity details (exercise sets for strength training)
+                activity_type = activity_data.get('activity_type')
+                self._sync_activity_details(user_id, str(activity_id), activity_type)
+
             self.progress.task_complete("activities", sync_date)
 
         except Exception as e:
             self.progress.task_failed("activities", sync_date)
             stats['failed'] += 1
+
+    def _sync_activity_details(self, user_id: int, activity_id: str, activity_type: str = None):
+        """Sync detailed data for a single activity.
+
+        For strength training activities, fetches exercise sets (reps, weight, etc.).
+        Basic activity details (distance, calories, etc.) are already extracted from
+        the activity list API response during the initial sync.
+
+        Args:
+            user_id: User identifier
+            activity_id: Activity ID to fetch details for
+            activity_type: Activity type key (e.g., 'strength_training')
+        """
+        try:
+            # Only fetch exercise sets for strength training activities
+            strength_types = ['strength_training', 'indoor_strength_training']
+
+            if activity_type and activity_type in strength_types:
+                activities_accessor = self.api_client.metrics.get('activities')
+                self._sync_exercise_sets(user_id, activity_id, activities_accessor)
+
+                # Apply rate limiting delay after API call
+                import time
+                time.sleep(self.config.sync.rate_limit_delay)
+
+            # Mark activity as having details synced
+            self.db.update_activity_details(user_id, activity_id, {'details_synced': True})
+
+        except Exception as e:
+            self.progress.warning(f"Failed to sync details for activity {activity_id}: {e}")
+
+    def _sync_exercise_sets(self, user_id: int, activity_id: str, activities_accessor):
+        """Sync exercise sets for a strength training activity.
+
+        Args:
+            user_id: User identifier
+            activity_id: Activity ID to fetch sets for
+            activities_accessor: The activities API accessor
+        """
+        try:
+            sets_data = activities_accessor.get_exercise_sets(activity_id)
+            if sets_data:
+                sets = self.extractor.extract_exercise_sets(sets_data, activity_id)
+                if sets:
+                    self.db.store_exercise_sets(user_id, activity_id, sets)
+
+                    # Calculate and store summary
+                    summary = self.extractor.calculate_strength_summary(sets)
+                    self.db.update_activity_details(user_id, activity_id, summary)
+
+        except Exception as e:
+            self.progress.warning(f"Failed to sync exercise sets for activity {activity_id}: {e}")
+
+    def backfill_activity_details(self, user_id: int, limit: int = 100) -> Dict[str, int]:
+        """Backfill detailed data for activities that don't have details synced.
+
+        Args:
+            user_id: User identifier
+            limit: Maximum number of activities to process
+
+        Returns:
+            Dict with sync statistics
+        """
+        if not self.api_client:
+            raise RuntimeError("Must call initialize() before backfilling")
+
+        stats = {'completed': 0, 'failed': 0, 'total': 0}
+
+        activities = self.db.get_activities_without_details(user_id, limit)
+        stats['total'] = len(activities)
+
+        self.progress.info(f"Backfilling details for {len(activities)} activities")
+
+        for activity in activities:
+            activity_id = activity['activity_id']
+            activity_type = activity.get('activity_type')
+            try:
+                self._sync_activity_details(user_id, str(activity_id), activity_type)
+                stats['completed'] += 1
+            except Exception as e:
+                self.progress.warning(f"Failed to backfill activity {activity_id}: {e}")
+                stats['failed'] += 1
+
+        self.progress.info(f"Backfill complete: {stats['completed']} succeeded, {stats['failed']} failed")
+        return stats
 
     def _store_health_metric(self, user_id: int, sync_date: date, metric_type: MetricType, data: Dict):
         """Store health metric data in normalized table."""

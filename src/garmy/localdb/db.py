@@ -4,10 +4,10 @@ from datetime import date
 from pathlib import Path
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
-from sqlalchemy import create_engine, and_
+from sqlalchemy import create_engine, and_, text, inspect
 from sqlalchemy.orm import sessionmaker, Session
 
-from .models import Base, TimeSeries, Activity, DailyHealthMetric, SyncStatus, MetricType
+from .models import Base, TimeSeries, Activity, DailyHealthMetric, SyncStatus, MetricType, ExerciseSet
 
 if TYPE_CHECKING:
     from .config import DatabaseConfig
@@ -40,9 +40,49 @@ class HealthDB:
         
         self.engine = create_engine(f"sqlite:///{db_path}")
         self.SessionLocal = sessionmaker(bind=self.engine)
-        
+
         Base.metadata.create_all(self.engine)
-    
+
+        # Run migrations to add new columns to existing databases
+        self._migrate_schema()
+
+    def _migrate_schema(self):
+        """Migrate database schema to add new columns for existing databases."""
+        inspector = inspect(self.engine)
+
+        # Check if activities table exists and needs migration
+        if 'activities' in inspector.get_table_names():
+            existing_columns = {col['name'] for col in inspector.get_columns('activities')}
+
+            # New columns to add to activities table
+            new_activity_columns = [
+                ('activity_type', 'VARCHAR'),
+                ('distance_meters', 'FLOAT'),
+                ('calories', 'INTEGER'),
+                ('elevation_gain', 'FLOAT'),
+                ('elevation_loss', 'FLOAT'),
+                ('avg_speed', 'FLOAT'),
+                ('max_speed', 'FLOAT'),
+                ('max_heart_rate', 'INTEGER'),
+                ('total_sets', 'INTEGER'),
+                ('total_reps', 'INTEGER'),
+                ('total_weight_kg', 'FLOAT'),
+                ('details_synced', 'BOOLEAN DEFAULT 0'),
+                ('updated_at', 'DATETIME'),
+            ]
+
+            with self.engine.connect() as conn:
+                for col_name, col_type in new_activity_columns:
+                    if col_name not in existing_columns:
+                        try:
+                            conn.execute(text(f'ALTER TABLE activities ADD COLUMN {col_name} {col_type}'))
+                            conn.commit()
+                        except Exception:
+                            # Column might already exist or other issue, continue
+                            pass
+
+        # Create exercise_sets table if it doesn't exist (handled by create_all above)
+
     def get_session(self) -> Session:
         """Get database session."""
         return self.SessionLocal()
@@ -57,7 +97,7 @@ class HealthDB:
     def validate_schema(self) -> bool:
         """Validate database schema."""
         try:
-            expected_tables = {'timeseries', 'activities', 'daily_health_metrics', 'sync_status'}
+            expected_tables = {'timeseries', 'activities', 'daily_health_metrics', 'sync_status', 'exercise_sets'}
             actual_tables = set(Base.metadata.tables.keys())
             return expected_tables.issubset(actual_tables)
         except Exception:
@@ -81,7 +121,7 @@ class HealthDB:
             session.commit()
     
     def store_activity(self, user_id: int, activity_data: Dict[str, Any]):
-        """Store activity data."""
+        """Store activity data including all available fields from API."""
         with self.get_session() as session:
             activity = Activity(
                 user_id=user_id,
@@ -90,8 +130,17 @@ class HealthDB:
                 activity_name=activity_data.get('activity_name'),
                 duration_seconds=activity_data.get('duration_seconds'),
                 avg_heart_rate=activity_data.get('avg_heart_rate'),
+                max_heart_rate=activity_data.get('max_heart_rate'),
                 training_load=activity_data.get('training_load'),
-                start_time=activity_data.get('start_time')
+                start_time=activity_data.get('start_time'),
+                # Extended fields from activity list
+                activity_type=activity_data.get('activity_type'),
+                distance_meters=activity_data.get('distance_meters'),
+                calories=activity_data.get('calories'),
+                elevation_gain=activity_data.get('elevation_gain'),
+                elevation_loss=activity_data.get('elevation_loss'),
+                avg_speed=activity_data.get('avg_speed'),
+                max_speed=activity_data.get('max_speed'),
             )
             session.merge(activity)
             session.commit()
@@ -310,5 +359,114 @@ class HealthDB:
             'avg_heart_rate': activity.avg_heart_rate,
             'training_load': activity.training_load,
             'start_time': activity.start_time,
-            'created_at': activity.created_at
+            'created_at': activity.created_at,
+            # Extended activity details
+            'activity_type': activity.activity_type,
+            'distance_meters': activity.distance_meters,
+            'calories': activity.calories,
+            'elevation_gain': activity.elevation_gain,
+            'elevation_loss': activity.elevation_loss,
+            'avg_speed': activity.avg_speed,
+            'max_speed': activity.max_speed,
+            'max_heart_rate': activity.max_heart_rate,
+            # Strength training summary
+            'total_sets': activity.total_sets,
+            'total_reps': activity.total_reps,
+            'total_weight_kg': activity.total_weight_kg,
+            'details_synced': activity.details_synced,
+            'updated_at': activity.updated_at
+        }
+
+    def store_exercise_sets(self, user_id: int, activity_id: str, sets: List[Dict[str, Any]]):
+        """Store exercise sets for an activity."""
+        with self.get_session() as session:
+            for set_data in sets:
+                exercise_set = ExerciseSet(
+                    user_id=user_id,
+                    activity_id=activity_id,
+                    set_order=set_data.get('set_order', 0),
+                    exercise_category=set_data.get('exercise_category'),
+                    exercise_name=set_data.get('exercise_name'),
+                    set_type=set_data.get('set_type'),
+                    repetition_count=set_data.get('repetition_count'),
+                    weight_grams=set_data.get('weight_grams'),
+                    duration_seconds=set_data.get('duration_seconds'),
+                    start_time=set_data.get('start_time')
+                )
+                session.merge(exercise_set)
+            session.commit()
+
+    def get_exercise_sets(self, user_id: int, activity_id: str) -> List[Dict[str, Any]]:
+        """Get exercise sets for an activity."""
+        with self.get_session() as session:
+            sets = session.query(ExerciseSet).filter(
+                and_(
+                    ExerciseSet.user_id == user_id,
+                    ExerciseSet.activity_id == activity_id
+                )
+            ).order_by(ExerciseSet.set_order).all()
+            return [self._exercise_set_to_dict(s) for s in sets]
+
+    def get_all_exercise_sets(self, user_id: int, start_date: date, end_date: date) -> List[Dict[str, Any]]:
+        """Get all exercise sets for activities in date range."""
+        with self.get_session() as session:
+            # Join with activities to filter by date
+            sets = session.query(ExerciseSet).join(
+                Activity,
+                and_(
+                    ExerciseSet.user_id == Activity.user_id,
+                    ExerciseSet.activity_id == Activity.activity_id
+                )
+            ).filter(
+                and_(
+                    ExerciseSet.user_id == user_id,
+                    Activity.activity_date >= start_date,
+                    Activity.activity_date <= end_date
+                )
+            ).order_by(Activity.activity_date, ExerciseSet.set_order).all()
+            return [self._exercise_set_to_dict(s) for s in sets]
+
+    def update_activity_details(self, user_id: int, activity_id: str, details: Dict[str, Any]):
+        """Update activity with detailed data."""
+        with self.get_session() as session:
+            activity = session.query(Activity).filter(
+                and_(
+                    Activity.user_id == user_id,
+                    Activity.activity_id == activity_id
+                )
+            ).first()
+
+            if activity:
+                for field, value in details.items():
+                    if hasattr(activity, field):
+                        setattr(activity, field, value)
+                activity.details_synced = True
+                session.commit()
+
+    def get_activities_without_details(self, user_id: int, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get activities that haven't had details synced yet."""
+        with self.get_session() as session:
+            activities = session.query(Activity).filter(
+                and_(
+                    Activity.user_id == user_id,
+                    Activity.details_synced == False  # noqa: E712
+                )
+            ).order_by(Activity.activity_date.desc()).limit(limit).all()
+            return [self._activity_to_dict(a) for a in activities]
+
+    def _exercise_set_to_dict(self, exercise_set: ExerciseSet) -> Dict[str, Any]:
+        """Convert ExerciseSet to dictionary."""
+        return {
+            'user_id': exercise_set.user_id,
+            'activity_id': exercise_set.activity_id,
+            'set_order': exercise_set.set_order,
+            'exercise_category': exercise_set.exercise_category,
+            'exercise_name': exercise_set.exercise_name,
+            'set_type': exercise_set.set_type,
+            'repetition_count': exercise_set.repetition_count,
+            'weight_grams': exercise_set.weight_grams,
+            'weight_kg': exercise_set.weight_grams / 1000 if exercise_set.weight_grams else None,
+            'duration_seconds': exercise_set.duration_seconds,
+            'start_time': exercise_set.start_time,
+            'created_at': exercise_set.created_at
         }

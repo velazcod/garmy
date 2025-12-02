@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from enum import Enum
 
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, JSON, Text
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, JSON, Text, Boolean
 from sqlalchemy.orm import declarative_base
 
 
@@ -48,6 +48,44 @@ class Activity(Base):
     avg_heart_rate = Column(Integer)
     training_load = Column(Float)
     start_time = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Activity type and detailed metrics
+    activity_type = Column(String)  # running, cycling, strength_training, etc.
+    distance_meters = Column(Float)
+    calories = Column(Integer)
+    elevation_gain = Column(Float)
+    elevation_loss = Column(Float)
+    avg_speed = Column(Float)  # meters per second
+    max_speed = Column(Float)
+    max_heart_rate = Column(Integer)
+
+    # Strength training summary
+    total_sets = Column(Integer)
+    total_reps = Column(Integer)
+    total_weight_kg = Column(Float)  # Calculated total volume
+
+    # Sync tracking
+    details_synced = Column(Boolean, default=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ExerciseSet(Base):
+    """Exercise sets from strength training activities."""
+    __tablename__ = "exercise_sets"
+
+    user_id = Column(Integer, primary_key=True, nullable=False)
+    activity_id = Column(String, primary_key=True, nullable=False)
+    set_order = Column(Integer, primary_key=True, nullable=False)  # Order within activity
+
+    exercise_category = Column(String)  # CURL, BENCH_PRESS, SQUAT, etc.
+    exercise_name = Column(String)
+    set_type = Column(String)  # ACTIVE, REST
+    repetition_count = Column(Integer)
+    weight_grams = Column(Float)  # Store in grams for precision
+    duration_seconds = Column(Float)
+    start_time = Column(String)
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

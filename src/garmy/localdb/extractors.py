@@ -178,7 +178,11 @@ class DataExtractor:
         return {}
     
     def _extract_activity_data(self, data: Any) -> Dict[str, Any]:
-        """Extract activity data from both parsed and raw formats."""
+        """Extract activity data from both parsed and raw formats.
+
+        Extracts comprehensive activity data from the activity list API response,
+        which includes all the fields we need without requiring separate API calls.
+        """
         # Handle both object attributes and dict keys
         def get_value(obj, *keys):
             for key in keys:
@@ -187,16 +191,45 @@ class DataExtractor:
                 elif isinstance(obj, dict) and key in obj:
                     return obj[key]
             return None
-        
+
+        def get_nested_value(obj, outer_key, inner_key):
+            """Get value from nested dict/object."""
+            outer = get_value(obj, outer_key)
+            if outer:
+                if isinstance(outer, dict):
+                    return outer.get(inner_key)
+                elif hasattr(outer, inner_key):
+                    return getattr(outer, inner_key, None)
+            return None
+
         activity_id = get_value(data, 'activity_id', 'activityId')
         if activity_id:
+            # Extract activity type from nested activityType dict
+            # Parsed ActivitySummary uses 'type_key', raw dict uses 'typeKey'
+            activity_type = get_nested_value(data, 'activity_type', 'type_key')
+            if not activity_type:
+                activity_type = get_nested_value(data, 'activity_type', 'typeKey')
+            if not activity_type:
+                activity_type = get_nested_value(data, 'activityType', 'typeKey')
+
             return {
                 'activity_id': activity_id,
-                'activity_name': get_value(data, 'activity_name', 'activityName', 'activityTypeName'),
+                'activity_name': get_value(data, 'activity_name', 'activityName'),
                 'duration_seconds': get_value(data, 'duration', 'movingDuration', 'elapsedDuration'),
+                # Heart rate - parsed uses average_hr/max_hr, raw uses averageHR/maxHR
                 'avg_heart_rate': get_value(data, 'average_hr', 'averageHR', 'avgHR'),
-                'training_load': get_value(data, 'activity_training_load', 'trainingLoad'),
-                'start_time': get_value(data, 'start_time_local', 'startTimeLocal', 'start_time')
+                'max_heart_rate': get_value(data, 'max_hr', 'maxHR'),
+                'training_load': get_value(data, 'activity_training_load', 'activityTrainingLoad', 'trainingLoad'),
+                'start_time': get_value(data, 'start_time_local', 'startTimeLocal', 'start_time'),
+                # Activity type extracted above
+                'activity_type': activity_type,
+                # These may not be in parsed ActivitySummary, but try anyway
+                'distance_meters': get_value(data, 'distance', 'distance_meters'),
+                'calories': get_value(data, 'calories'),
+                'elevation_gain': get_value(data, 'elevation_gain', 'elevationGain'),
+                'elevation_loss': get_value(data, 'elevation_loss', 'elevationLoss'),
+                'avg_speed': get_value(data, 'average_speed', 'averageSpeed'),
+                'max_speed': get_value(data, 'max_speed', 'maxSpeed'),
             }
         return {}
     
@@ -254,4 +287,96 @@ class DataExtractor:
             'total_calories': getattr(data, 'total_kilocalories', None),
             'active_calories': getattr(data, 'active_kilocalories', None),
             'bmr_calories': getattr(data, 'bmr_kilocalories', None)
+        }
+
+    def extract_activity_details(self, data: Dict) -> Dict[str, Any]:
+        """Extract detailed activity data from activity details API response.
+
+        Args:
+            data: Raw API response from /activity-service/activity/{id}
+
+        Returns:
+            Dict with normalized activity detail fields.
+        """
+        if not data:
+            return {}
+
+        activity_type_info = data.get('activityType', {})
+
+        return {
+            'activity_type': activity_type_info.get('typeKey') if activity_type_info else None,
+            'distance_meters': data.get('distance'),
+            'calories': data.get('calories'),
+            'elevation_gain': data.get('elevationGain'),
+            'elevation_loss': data.get('elevationLoss'),
+            'avg_speed': data.get('avgSpeed'),
+            'max_speed': data.get('maxSpeed'),
+            'max_heart_rate': data.get('maxHR'),
+        }
+
+    def extract_exercise_sets(self, data: Dict, activity_id: str) -> List[Dict[str, Any]]:
+        """Extract exercise sets from exerciseSets API response.
+
+        Args:
+            data: Raw API response from /activity-service/activity/{id}/exerciseSets
+            activity_id: The activity ID these sets belong to
+
+        Returns:
+            List of dicts with normalized exercise set fields.
+        """
+        if not data:
+            return []
+
+        sets = []
+        exercise_sets = data.get('exerciseSets', [])
+
+        for i, set_data in enumerate(exercise_sets):
+            exercises = set_data.get('exercises', [])
+
+            # Get most probable exercise category from the exercises list
+            category = None
+            exercise_name = None
+            if exercises:
+                # Sort by probability and get the best match
+                best_match = max(exercises, key=lambda x: x.get('probability', 0))
+                category = best_match.get('category')
+                exercise_name = best_match.get('name')
+
+            sets.append({
+                'set_order': i,
+                'exercise_category': category,
+                'exercise_name': exercise_name,
+                'set_type': set_data.get('setType'),
+                'repetition_count': set_data.get('repetitionCount'),
+                'weight_grams': set_data.get('weight'),  # API returns weight in milligrams
+                'duration_seconds': set_data.get('duration'),
+                'start_time': set_data.get('startTime')
+            })
+
+        return sets
+
+    def calculate_strength_summary(self, sets: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Calculate strength training summary from exercise sets.
+
+        Args:
+            sets: List of exercise set dicts from extract_exercise_sets
+
+        Returns:
+            Dict with total_sets, total_reps, total_weight_kg
+        """
+        active_sets = [s for s in sets if s.get('set_type') == 'ACTIVE']
+
+        total_reps = sum(s.get('repetition_count', 0) or 0 for s in active_sets)
+
+        # Calculate total volume (sum of weight * reps for each set)
+        total_volume_grams = 0
+        for s in active_sets:
+            weight = s.get('weight_grams', 0) or 0
+            reps = s.get('repetition_count', 0) or 0
+            total_volume_grams += weight * reps
+
+        return {
+            'total_sets': len(active_sets),
+            'total_reps': total_reps,
+            'total_weight_kg': total_volume_grams / 1000 if total_volume_grams else 0
         }

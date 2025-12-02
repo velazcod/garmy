@@ -33,6 +33,9 @@ garmy-sync status
 
 # Reset failed sync records
 garmy-sync reset --force
+
+# Backfill activity details for existing activities
+garmy-sync backfill --limit 100
 ```
 
 ## 📊 Database Schema
@@ -60,8 +63,18 @@ Individual workouts and activities with performance metrics.
 
 **Key Fields:**
 - `user_id`, `activity_id` (Primary Key)
-- `activity_name`, `duration_seconds`, `avg_heart_rate`
-- `training_load`, `activity_date`
+- `activity_name`, `activity_type`, `duration_seconds`
+- `avg_heart_rate`, `max_heart_rate`, `training_load`
+- `distance_meters`, `calories`, `elevation_gain/loss`
+- `total_sets`, `total_reps`, `total_weight_kg` (strength training)
+
+#### `exercise_sets`
+Individual exercise sets from strength training activities.
+
+**Key Fields:**
+- `user_id`, `activity_id`, `set_order` (Primary Key)
+- `exercise_category` (CURL, BENCH_PRESS, SQUAT, etc.)
+- `repetition_count`, `weight_grams`, `duration_seconds`
 
 #### `sync_status`
 Sync status tracking for each metric per date.
@@ -208,13 +221,13 @@ with db.get_session() as session:
 ```python
 # Analyze workout intensity
 activity_query = """
-    SELECT 
+    SELECT
         activity_name,
         AVG(avg_heart_rate) as avg_hr,
         AVG(training_load) as avg_load,
         COUNT(*) as workout_count
-    FROM activities 
-    WHERE user_id = 1 
+    FROM activities
+    WHERE user_id = 1
         AND activity_date >= date('now', '-90 days')
     GROUP BY activity_name
     HAVING workout_count >= 3
@@ -223,13 +236,80 @@ activity_query = """
 
 with db.get_session() as session:
     results = session.execute(text(activity_query)).fetchall()
-    
+
     for row in results:
         print(f"{row.activity_name}: {row.avg_hr:.0f} BPM avg, "
               f"{row.avg_load:.1f} training load ({row.workout_count} workouts)")
 ```
 
+### Strength Training Analysis
+```python
+# Analyze workout volume over time
+volume_query = """
+    SELECT
+        activity_date,
+        activity_name,
+        total_sets,
+        total_reps,
+        total_weight_kg
+    FROM activities
+    WHERE user_id = 1
+        AND activity_type = 'strength_training'
+        AND activity_date >= date('now', '-30 days')
+    ORDER BY activity_date DESC
+"""
+
+# Analyze specific exercise categories
+exercise_query = """
+    SELECT
+        exercise_category,
+        COUNT(*) as total_sets,
+        SUM(repetition_count) as total_reps,
+        ROUND(SUM(weight_grams) / 1000.0, 1) as total_weight_kg,
+        ROUND(AVG(weight_grams) / 1000.0, 1) as avg_weight_kg
+    FROM exercise_sets
+    WHERE user_id = 1
+        AND set_type = 'ACTIVE'
+    GROUP BY exercise_category
+    ORDER BY total_weight_kg DESC
+"""
+
+# Track strength progression for a specific exercise
+progression_query = """
+    SELECT
+        a.activity_date,
+        e.exercise_category,
+        MAX(e.weight_grams) / 1000.0 as max_weight_kg,
+        AVG(e.repetition_count) as avg_reps
+    FROM exercise_sets e
+    JOIN activities a ON e.activity_id = a.activity_id AND e.user_id = a.user_id
+    WHERE e.user_id = 1
+        AND e.exercise_category = 'BENCH_PRESS'
+        AND e.set_type = 'ACTIVE'
+    GROUP BY a.activity_date
+    ORDER BY a.activity_date
+"""
+```
+
 ## 🔄 Advanced Sync Operations
+
+### Activity Details and Exercise Sets
+
+When syncing activities, the system automatically fetches exercise sets for strength training activities. This includes:
+- Exercise category (CURL, BENCH_PRESS, SQUAT, etc.)
+- Repetition count and weight
+- Set duration and timing
+
+**Backfilling existing activities:**
+```bash
+# Backfill details for activities that were synced before this feature
+garmy-sync backfill --limit 100
+
+# Check backfill progress
+garmy-sync status
+```
+
+The backfill command fetches exercise sets for strength training activities that don't have details yet. Use `--limit` to control how many activities to process per run.
 
 ### Selective Metric Sync
 ```python
@@ -266,6 +346,12 @@ stats = sync_manager.sync_range(user_id=1, start_date=start_date, end_date=end_d
 ```
 
 ## 🛠️ Troubleshooting
+
+### Database Migrations
+
+Database schema migrations are **automatic**. When new columns or tables are added (like `exercise_sets`), they are created automatically when you use the database. No manual migration steps required.
+
+For existing databases, new columns are added to the `activities` table using `ALTER TABLE` statements on first use.
 
 ### Common Issues
 

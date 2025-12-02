@@ -6,10 +6,11 @@ Complete reference for Garmy's LocalDB database schema and structure.
 
 The Garmy LocalDB uses SQLite with optimized tables for health data storage:
 
-- **4 main tables** for different data types
+- **5 main tables** for different data types
 - **Normalized structure** for efficient querying
 - **Dedicated columns** for common health metrics
 - **Sync tracking** for data integrity
+- **Automatic migrations** for schema updates
 
 ## 📊 Schema Diagram
 
@@ -31,10 +32,19 @@ timeseries (High-frequency data)
 
 activities (Workouts and activities)
 ├── user_id, activity_id (PK)
-├── activity_date, activity_name
-├── duration_seconds, avg_heart_rate
+├── activity_date, activity_name, activity_type
+├── duration_seconds, avg_heart_rate, max_heart_rate
+├── distance_meters, calories, elevation_gain/loss
 ├── training_load, start_time
-└── created_at
+├── total_sets, total_reps, total_weight_kg (strength)
+└── details_synced, created_at, updated_at
+
+exercise_sets (Strength training sets)
+├── user_id, activity_id, set_order (PK)
+├── exercise_category, exercise_name
+├── repetition_count, weight_grams
+├── set_type, duration_seconds
+└── start_time, created_at
 
 sync_status (Sync tracking)
 ├── user_id, sync_date, metric_type (PK)
@@ -137,16 +147,77 @@ meta_data    JSON       -- Additional metadata (optional)
 
 **Columns:**
 ```sql
+-- Identity
 user_id         INTEGER    -- User identifier
 activity_id     STRING     -- Garmin activity ID
 activity_date   DATE       -- Date of activity
-activity_name   STRING     -- Activity type (e.g., "Running", "Cycling")
+activity_name   STRING     -- Activity display name (e.g., "Morning Run")
+activity_type   STRING     -- Activity type key (running, cycling, strength_training)
+
+-- Performance Metrics
 duration_seconds INTEGER   -- Activity duration in seconds
 avg_heart_rate  INTEGER    -- Average heart rate during activity
+max_heart_rate  INTEGER    -- Maximum heart rate during activity
 training_load   FLOAT      -- Training load/stress score
 start_time      STRING     -- Activity start time
+
+-- Distance and Movement
+distance_meters FLOAT      -- Total distance in meters
+calories        INTEGER    -- Calories burned
+elevation_gain  FLOAT      -- Elevation gained in meters
+elevation_loss  FLOAT      -- Elevation lost in meters
+avg_speed       FLOAT      -- Average speed (m/s)
+max_speed       FLOAT      -- Maximum speed (m/s)
+
+-- Strength Training Summary (populated for strength activities)
+total_sets      INTEGER    -- Total active sets in workout
+total_reps      INTEGER    -- Total repetitions across all sets
+total_weight_kg FLOAT      -- Total volume (sum of weight × reps)
+
+-- Sync Tracking
+details_synced  BOOLEAN    -- Whether exercise sets have been synced
 created_at      DATETIME   -- Record creation time
+updated_at      DATETIME   -- Last update time
 ```
+
+**Activity Types:**
+- `running`, `cycling`, `swimming` - Cardio activities
+- `strength_training`, `indoor_strength_training` - Strength workouts
+- `walking`, `hiking` - Walking activities
+- `yoga`, `pilates` - Flexibility/wellness
+
+### `exercise_sets`
+**Purpose:** Individual exercise sets from strength training activities
+
+**Primary Key:** `(user_id, activity_id, set_order)`
+
+**Columns:**
+```sql
+-- Identity
+user_id           INTEGER    -- User identifier
+activity_id       STRING     -- Parent activity ID (FK to activities)
+set_order         INTEGER    -- Order within activity (0-indexed)
+
+-- Exercise Info
+exercise_category STRING     -- Exercise type (CURL, BENCH_PRESS, SQUAT, etc.)
+exercise_name     STRING     -- Custom exercise name (if available)
+set_type          STRING     -- Set type: ACTIVE or REST
+
+-- Set Metrics
+repetition_count  INTEGER    -- Number of reps in set
+weight_grams      FLOAT      -- Weight in grams (divide by 1000 for kg)
+duration_seconds  FLOAT      -- Set duration in seconds
+start_time        STRING     -- Set start timestamp
+
+-- Metadata
+created_at        DATETIME   -- Record creation time
+```
+
+**Common Exercise Categories:**
+- Upper body: `BENCH_PRESS`, `SHOULDER_PRESS`, `CURL`, `TRICEP_EXTENSION`, `LAT_PULLDOWN`, `ROW`
+- Lower body: `SQUAT`, `DEADLIFT`, `LEG_PRESS`, `LUNGE`, `LEG_CURL`, `LEG_EXTENSION`
+- Core: `PLANK`, `CRUNCH`, `RUSSIAN_TWIST`
+- Other: `UNKNOWN` (when Garmin cannot identify the exercise)
 
 ### `sync_status`
 **Purpose:** Track synchronization status for each metric per date
@@ -229,16 +300,68 @@ ORDER BY timestamp;
 
 ### Sync Status Check
 ```sql
-SELECT 
+SELECT
     sync_date,
     metric_type,
     status,
     synced_at,
     error_message
-FROM sync_status 
-WHERE user_id = 1 
+FROM sync_status
+WHERE user_id = 1
     AND status = 'failed'
 ORDER BY sync_date DESC;
+```
+
+### Strength Training Volume
+```sql
+-- Weekly workout volume
+SELECT
+    strftime('%Y-W%W', activity_date) as week,
+    COUNT(*) as workouts,
+    SUM(total_sets) as total_sets,
+    SUM(total_reps) as total_reps,
+    ROUND(SUM(total_weight_kg), 1) as total_volume_kg
+FROM activities
+WHERE user_id = 1
+    AND activity_type IN ('strength_training', 'indoor_strength_training')
+    AND activity_date >= date('now', '-90 days')
+GROUP BY week
+ORDER BY week;
+```
+
+### Exercise Progression
+```sql
+-- Track max weight progression for an exercise
+SELECT
+    a.activity_date,
+    e.exercise_category,
+    MAX(e.weight_grams) / 1000.0 as max_weight_kg,
+    SUM(e.repetition_count) as total_reps
+FROM exercise_sets e
+JOIN activities a ON e.activity_id = a.activity_id AND e.user_id = a.user_id
+WHERE e.user_id = 1
+    AND e.exercise_category = 'BENCH_PRESS'
+    AND e.set_type = 'ACTIVE'
+GROUP BY a.activity_date
+ORDER BY a.activity_date;
+```
+
+### Exercise Category Summary
+```sql
+-- Volume by exercise category
+SELECT
+    exercise_category,
+    COUNT(*) as total_sets,
+    SUM(repetition_count) as total_reps,
+    ROUND(SUM(weight_grams) / 1000.0, 1) as total_weight_kg,
+    ROUND(AVG(weight_grams) / 1000.0, 1) as avg_weight_kg,
+    ROUND(AVG(repetition_count), 1) as avg_reps
+FROM exercise_sets
+WHERE user_id = 1
+    AND set_type = 'ACTIVE'
+    AND weight_grams > 0
+GROUP BY exercise_category
+ORDER BY total_weight_kg DESC;
 ```
 
 ## 📈 Data Relationships

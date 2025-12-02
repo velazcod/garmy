@@ -168,10 +168,33 @@ def cmd_status(args) -> int:
             recent_records = session.query(SyncStatus).filter(
                 SyncStatus.synced_at.isnot(None)
             ).order_by(SyncStatus.synced_at.desc()).limit(5).all()
-            
+
             for record in recent_records:
                 print(f"{record.synced_at} {record.sync_date} {record.metric_type}: {record.status}")
-        
+
+            # Show activity details backfill status
+            from .models import Activity
+            from sqlalchemy import and_
+            total_activities = session.query(Activity).filter(
+                Activity.user_id == args.user_id
+            ).count()
+
+            backfilled = session.query(Activity).filter(
+                and_(
+                    Activity.user_id == args.user_id,
+                    Activity.details_synced == True  # noqa: E712
+                )
+            ).count()
+
+            pending = total_activities - backfilled
+
+            print(f"\n=== ACTIVITY DETAILS BACKFILL ===")
+            print(f"Total activities: {total_activities}")
+            print(f"Details synced: {backfilled}")
+            print(f"Pending backfill: {pending}")
+            if total_activities > 0:
+                print(f"Progress: {backfilled / total_activities * 100:.1f}%")
+
         return 0
         
     except Exception as e:
@@ -183,38 +206,86 @@ def cmd_reset(args) -> int:
     """Reset failed sync statuses to pending."""
     try:
         from .db import HealthDB
-        
+
         db = HealthDB(args.db_path)
-        
+
         with db.get_session() as session:
             from .models import SyncStatus
-            
+
             # Count failed records
             failed_count = session.query(SyncStatus).filter(SyncStatus.status == 'failed').count()
-            
+
             if failed_count == 0:
                 print("No failed records found")
                 return 0
-            
+
             # Confirm reset
             if not args.force:
                 response = input(f"Reset {failed_count} failed records to pending? (y/N): ")
                 if response.lower() != 'y':
                     print("Reset cancelled")
                     return 0
-            
+
             # Reset failed to pending
             updated = session.query(SyncStatus).filter(SyncStatus.status == 'failed').update({
                 'status': 'pending',
                 'error_message': None,
                 'synced_at': None
             })
-            
+
             session.commit()
             print(f"Reset {updated} failed records to pending")
-        
+
         return 0
-        
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+
+def cmd_backfill(args) -> int:
+    """Backfill activity details for existing activities."""
+    try:
+        # Setup progress reporter
+        progress_reporter = ProgressReporter(use_tqdm=args.progress == 'tqdm')
+
+        # Initialize sync manager
+        config = LocalDBConfig()
+        manager = SyncManager(
+            db_path=args.db_path,
+            config=config,
+            progress_reporter=progress_reporter
+        )
+
+        # Try to initialize with saved tokens first
+        print("Connecting to Garmin Connect...")
+        try:
+            manager.initialize()
+            print("Using saved authentication tokens")
+        except RuntimeError:
+            # No valid tokens, prompt for credentials
+            email, password = get_credentials()
+            manager.initialize(email, password)
+
+        print(f"\nBackfilling activity details (limit: {args.limit} activities)")
+
+        # Execute backfill
+        stats = manager.backfill_activity_details(
+            user_id=args.user_id,
+            limit=args.limit
+        )
+
+        # Print results
+        print(f"\nBackfill completed!")
+        print(f"  Total activities: {stats['total']}")
+        print(f"  Completed: {stats['completed']}")
+        print(f"  Failed: {stats['failed']}")
+
+        return 0 if stats['failed'] == 0 else 1
+
+    except KeyboardInterrupt:
+        print("\nBackfill interrupted by user")
+        return 130
     except Exception as e:
         print(f"Error: {e}")
         return 1
@@ -232,6 +303,7 @@ Examples:
   %(prog)s sync --metrics DAILY_SUMMARY,SLEEP    # Sync specific metrics
   %(prog)s status                                 # Show sync status
   %(prog)s reset --force                         # Reset failed records
+  %(prog)s backfill --limit 50                   # Backfill activity details
         """
     )
     
@@ -269,7 +341,16 @@ Examples:
     reset_parser = subparsers.add_parser('reset', help='Reset failed sync records to pending')
     reset_parser.add_argument('--force', action='store_true',
                              help='Reset without confirmation prompt')
-    
+
+    # Backfill command
+    backfill_parser = subparsers.add_parser('backfill',
+                                            help='Backfill activity details for existing activities')
+    backfill_parser.add_argument('--limit', type=int, default=100,
+                                 help='Maximum number of activities to process (default: 100)')
+    backfill_parser.add_argument('--progress', choices=['tqdm', 'simple', 'silent'],
+                                 default='tqdm',
+                                 help='Progress display mode (default: tqdm)')
+
     return parser
 
 
@@ -289,6 +370,8 @@ def main() -> int:
         return cmd_status(args)
     elif args.command == 'reset':
         return cmd_reset(args)
+    elif args.command == 'backfill':
+        return cmd_backfill(args)
     else:
         print(f"Unknown command: {args.command}")
         return 1

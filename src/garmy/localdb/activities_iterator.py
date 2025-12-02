@@ -31,6 +31,19 @@ class ActivitiesIterator:
         """Initialize the iterator by loading first batch."""
         self._load_next_batch()
         self._advance_to_next_activity()
+
+    def reset(self):
+        """Reset iterator state for a new sync session.
+
+        This must be called before syncing activities to ensure the iterator
+        starts fresh and doesn't use stale cached data from previous syncs.
+        """
+        self.current_activity = None
+        self.current_activity_date = None
+        self.activities_cache = []
+        self.batch_offset = 0
+        self.has_more_data = True
+        self.initialize()
     
     def _load_next_batch(self) -> bool:
         """Load next batch of activities from API."""
