@@ -380,3 +380,81 @@ class DataExtractor:
             'total_reps': total_reps,
             'total_weight_kg': total_volume_grams / 1000 if total_volume_grams else 0
         }
+
+    def extract_activity_splits(self, data: Dict, activity_id: str) -> List[Dict[str, Any]]:
+        """Extract lap/split data from splits API response.
+
+        Args:
+            data: Raw API response from /activity-service/activity/{id}/splits
+            activity_id: The activity ID these splits belong to
+
+        Returns:
+            List of dicts with normalized split/lap fields.
+        """
+        if not data:
+            return []
+
+        splits = []
+        lap_dtos = data.get('lapDTOs', [])
+
+        for lap in lap_dtos:
+            splits.append({
+                'lap_index': lap.get('lapIndex', 0),
+                'start_time': lap.get('startTimeGMT'),
+                'duration_seconds': lap.get('duration'),
+                'moving_duration_seconds': lap.get('movingDuration'),
+                'distance_meters': lap.get('distance'),
+                'avg_speed': lap.get('averageSpeed'),
+                'max_speed': lap.get('maxSpeed'),
+                'avg_moving_speed': lap.get('averageMovingSpeed'),
+                'avg_heart_rate': int(lap.get('averageHR')) if lap.get('averageHR') else None,
+                'max_heart_rate': int(lap.get('maxHR')) if lap.get('maxHR') else None,
+                'elevation_gain': lap.get('elevationGain'),
+                'elevation_loss': lap.get('elevationLoss'),
+                'max_elevation': lap.get('maxElevation'),
+                'min_elevation': lap.get('minElevation'),
+                'avg_cadence': lap.get('averageRunCadence'),
+                'max_cadence': lap.get('maxRunCadence'),
+                'calories': lap.get('calories'),
+                'start_latitude': lap.get('startLatitude'),
+                'start_longitude': lap.get('startLongitude'),
+                'end_latitude': lap.get('endLatitude'),
+                'end_longitude': lap.get('endLongitude'),
+                'intensity_type': lap.get('intensityType'),
+            })
+
+        return splits
+
+    def calculate_splits_summary(self, splits: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Calculate activity summary from splits data.
+
+        Args:
+            splits: List of split dicts from extract_activity_splits
+
+        Returns:
+            Dict with total_laps and aggregated metrics
+        """
+        active_splits = [s for s in splits if s.get('intensity_type') == 'ACTIVE']
+
+        if not active_splits:
+            return {'total_laps': len(splits)}
+
+        total_distance = sum(s.get('distance_meters', 0) or 0 for s in active_splits)
+        total_duration = sum(s.get('duration_seconds', 0) or 0 for s in active_splits)
+        total_elevation_gain = sum(s.get('elevation_gain', 0) or 0 for s in active_splits)
+        total_calories = sum(s.get('calories', 0) or 0 for s in active_splits)
+
+        # Calculate average pace (min/km) if we have distance
+        avg_pace_min_km = None
+        if total_distance > 0 and total_duration > 0:
+            # pace = time / distance, convert to min/km
+            avg_pace_min_km = (total_duration / 60) / (total_distance / 1000)
+
+        return {
+            'total_laps': len(active_splits),
+            'total_distance_meters': total_distance,
+            'total_duration_seconds': total_duration,
+            'total_elevation_gain': total_elevation_gain,
+            'total_calories': total_calories,
+            'avg_pace_min_km': avg_pace_min_km
+        }

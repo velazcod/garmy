@@ -291,6 +291,55 @@ def cmd_backfill(args) -> int:
         return 1
 
 
+def cmd_backfill_splits(args) -> int:
+    """Backfill splits for cardio activities."""
+    try:
+        # Setup progress reporter
+        progress_reporter = ProgressReporter(use_tqdm=args.progress == 'tqdm')
+
+        # Initialize sync manager
+        config = LocalDBConfig()
+        manager = SyncManager(
+            db_path=args.db_path,
+            config=config,
+            progress_reporter=progress_reporter
+        )
+
+        # Try to initialize with saved tokens first
+        print("Connecting to Garmin Connect...")
+        try:
+            manager.initialize()
+            print("Using saved authentication tokens")
+        except RuntimeError:
+            # No valid tokens, prompt for credentials
+            email, password = get_credentials()
+            manager.initialize(email, password)
+
+        print(f"\nBackfilling splits for cardio activities (limit: {args.limit})")
+
+        # Execute backfill
+        stats = manager.backfill_activity_splits(
+            user_id=args.user_id,
+            limit=args.limit
+        )
+
+        # Print results
+        print(f"\nSplits backfill completed!")
+        print(f"  Total activities: {stats['total']}")
+        print(f"  Completed: {stats['completed']}")
+        print(f"  Skipped: {stats['skipped']}")
+        print(f"  Failed: {stats['failed']}")
+
+        return 0 if stats['failed'] == 0 else 1
+
+    except KeyboardInterrupt:
+        print("\nBackfill interrupted by user")
+        return 130
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create command-line argument parser."""
     parser = argparse.ArgumentParser(
@@ -304,6 +353,7 @@ Examples:
   %(prog)s status                                 # Show sync status
   %(prog)s reset --force                         # Reset failed records
   %(prog)s backfill --limit 50                   # Backfill activity details
+  %(prog)s backfill-splits --limit 50            # Backfill splits for cardio
         """
     )
     
@@ -351,6 +401,15 @@ Examples:
                                  default='tqdm',
                                  help='Progress display mode (default: tqdm)')
 
+    # Backfill splits command
+    backfill_splits_parser = subparsers.add_parser('backfill-splits',
+                                                    help='Backfill splits/laps for cardio activities')
+    backfill_splits_parser.add_argument('--limit', type=int, default=100,
+                                         help='Maximum number of activities to process (default: 100)')
+    backfill_splits_parser.add_argument('--progress', choices=['tqdm', 'simple', 'silent'],
+                                         default='tqdm',
+                                         help='Progress display mode (default: tqdm)')
+
     return parser
 
 
@@ -372,6 +431,8 @@ def main() -> int:
         return cmd_reset(args)
     elif args.command == 'backfill':
         return cmd_backfill(args)
+    elif args.command == 'backfill-splits':
+        return cmd_backfill_splits(args)
     else:
         print(f"Unknown command: {args.command}")
         return 1

@@ -233,27 +233,44 @@ class SyncManager:
             self.progress.task_failed("activities", sync_date)
             stats['failed'] += 1
 
+    # Activity types for fetching specific detail data
+    STRENGTH_TYPES = ['strength_training', 'indoor_strength_training']
+    CARDIO_TYPES = [
+        'running', 'treadmill_running', 'trail_running', 'track_running',
+        'cycling', 'indoor_cycling', 'virtual_ride', 'gravel_cycling', 'road_cycling',
+        'walking', 'hiking', 'swimming', 'lap_swimming', 'open_water_swimming',
+        'elliptical', 'stair_climbing', 'rowing', 'indoor_rowing'
+    ]
+
     def _sync_activity_details(self, user_id: int, activity_id: str, activity_type: str = None):
         """Sync detailed data for a single activity.
 
         For strength training activities, fetches exercise sets (reps, weight, etc.).
+        For cardio activities, fetches lap/split data.
         Basic activity details (distance, calories, etc.) are already extracted from
         the activity list API response during the initial sync.
 
         Args:
             user_id: User identifier
             activity_id: Activity ID to fetch details for
-            activity_type: Activity type key (e.g., 'strength_training')
+            activity_type: Activity type key (e.g., 'strength_training', 'running')
         """
         try:
-            # Only fetch exercise sets for strength training activities
-            strength_types = ['strength_training', 'indoor_strength_training']
+            activities_accessor = self.api_client.metrics.get('activities')
+            api_called = False
 
-            if activity_type and activity_type in strength_types:
-                activities_accessor = self.api_client.metrics.get('activities')
+            # Fetch exercise sets for strength training activities
+            if activity_type and activity_type in self.STRENGTH_TYPES:
                 self._sync_exercise_sets(user_id, activity_id, activities_accessor)
+                api_called = True
 
-                # Apply rate limiting delay after API call
+            # Fetch splits/laps for cardio activities
+            if activity_type and activity_type in self.CARDIO_TYPES:
+                self._sync_activity_splits(user_id, activity_id, activities_accessor)
+                api_called = True
+
+            # Apply rate limiting delay after API calls
+            if api_called:
                 import time
                 time.sleep(self.config.sync.rate_limit_delay)
 
@@ -284,6 +301,28 @@ class SyncManager:
 
         except Exception as e:
             self.progress.warning(f"Failed to sync exercise sets for activity {activity_id}: {e}")
+
+    def _sync_activity_splits(self, user_id: int, activity_id: str, activities_accessor):
+        """Sync lap/split data for a cardio activity.
+
+        Args:
+            user_id: User identifier
+            activity_id: Activity ID to fetch splits for
+            activities_accessor: The activities API accessor
+        """
+        try:
+            # Skip if already has splits
+            if self.db.activity_has_splits(user_id, activity_id):
+                return
+
+            splits_data = activities_accessor.get_activity_splits(activity_id)
+            if splits_data:
+                splits = self.extractor.extract_activity_splits(splits_data, activity_id)
+                if splits:
+                    self.db.store_activity_splits(user_id, activity_id, splits)
+
+        except Exception as e:
+            self.progress.warning(f"Failed to sync splits for activity {activity_id}: {e}")
 
     def backfill_activity_details(self, user_id: int, limit: int = 100) -> Dict[str, int]:
         """Backfill detailed data for activities that don't have details synced.
@@ -317,6 +356,80 @@ class SyncManager:
 
         self.progress.info(f"Backfill complete: {stats['completed']} succeeded, {stats['failed']} failed")
         return stats
+
+    def backfill_activity_splits(self, user_id: int, limit: int = 100) -> Dict[str, int]:
+        """Backfill splits for cardio activities that don't have splits yet.
+
+        This is useful for activities that were synced before the splits feature
+        was added, or when activities have details_synced=True but no splits.
+
+        Args:
+            user_id: User identifier
+            limit: Maximum number of activities to process
+
+        Returns:
+            Dict with sync statistics
+        """
+        if not self.api_client:
+            raise RuntimeError("Must call initialize() before backfilling")
+
+        stats = {'completed': 0, 'skipped': 0, 'failed': 0, 'total': 0}
+
+        # Get cardio activities that don't have splits
+        activities = self._get_cardio_activities_without_splits(user_id, limit)
+        stats['total'] = len(activities)
+
+        self.progress.info(f"Backfilling splits for {len(activities)} cardio activities")
+
+        activities_accessor = self.api_client.metrics.get('activities')
+
+        for activity in activities:
+            activity_id = activity['activity_id']
+            activity_type = activity.get('activity_type')
+
+            # Skip if not a cardio type
+            if activity_type not in self.CARDIO_TYPES:
+                stats['skipped'] += 1
+                continue
+
+            try:
+                self._sync_activity_splits(user_id, str(activity_id), activities_accessor)
+                stats['completed'] += 1
+
+                # Rate limiting
+                import time
+                time.sleep(self.config.sync.rate_limit_delay)
+
+            except Exception as e:
+                self.progress.warning(f"Failed to backfill splits for activity {activity_id}: {e}")
+                stats['failed'] += 1
+
+        self.progress.info(f"Splits backfill complete: {stats['completed']} succeeded, {stats['skipped']} skipped, {stats['failed']} failed")
+        return stats
+
+    def _get_cardio_activities_without_splits(self, user_id: int, limit: int) -> List[Dict[str, Any]]:
+        """Get cardio activities that don't have splits stored yet."""
+        with self.db.get_session() as session:
+            from .models import Activity, ActivitySplit
+            from sqlalchemy import and_, not_, exists
+
+            # Subquery to find activities with splits
+            has_splits = exists().where(
+                and_(
+                    ActivitySplit.user_id == Activity.user_id,
+                    ActivitySplit.activity_id == Activity.activity_id
+                )
+            )
+
+            activities = session.query(Activity).filter(
+                and_(
+                    Activity.user_id == user_id,
+                    Activity.activity_type.in_(self.CARDIO_TYPES),
+                    ~has_splits
+                )
+            ).order_by(Activity.activity_date.desc()).limit(limit).all()
+
+            return [self.db._activity_to_dict(a) for a in activities]
 
     def _store_health_metric(self, user_id: int, sync_date: date, metric_type: MetricType, data: Dict):
         """Store health metric data in normalized table."""

@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from sqlalchemy import create_engine, and_, text, inspect
 from sqlalchemy.orm import sessionmaker, Session
 
-from .models import Base, TimeSeries, Activity, DailyHealthMetric, SyncStatus, MetricType, ExerciseSet
+from .models import Base, TimeSeries, Activity, DailyHealthMetric, SyncStatus, MetricType, ExerciseSet, ActivitySplit
 
 if TYPE_CHECKING:
     from .config import DatabaseConfig
@@ -97,7 +97,7 @@ class HealthDB:
     def validate_schema(self) -> bool:
         """Validate database schema."""
         try:
-            expected_tables = {'timeseries', 'activities', 'daily_health_metrics', 'sync_status', 'exercise_sets'}
+            expected_tables = {'timeseries', 'activities', 'daily_health_metrics', 'sync_status', 'exercise_sets', 'activity_splits'}
             actual_tables = set(Base.metadata.tables.keys())
             return expected_tables.issubset(actual_tables)
         except Exception:
@@ -469,4 +469,114 @@ class HealthDB:
             'duration_seconds': exercise_set.duration_seconds,
             'start_time': exercise_set.start_time,
             'created_at': exercise_set.created_at
+        }
+
+    def store_activity_splits(self, user_id: int, activity_id: str, splits: List[Dict[str, Any]]):
+        """Store lap/split data for an activity."""
+        with self.get_session() as session:
+            for split_data in splits:
+                split = ActivitySplit(
+                    user_id=user_id,
+                    activity_id=activity_id,
+                    lap_index=split_data.get('lap_index', 0),
+                    start_time=split_data.get('start_time'),
+                    duration_seconds=split_data.get('duration_seconds'),
+                    moving_duration_seconds=split_data.get('moving_duration_seconds'),
+                    distance_meters=split_data.get('distance_meters'),
+                    avg_speed=split_data.get('avg_speed'),
+                    max_speed=split_data.get('max_speed'),
+                    avg_moving_speed=split_data.get('avg_moving_speed'),
+                    avg_heart_rate=split_data.get('avg_heart_rate'),
+                    max_heart_rate=split_data.get('max_heart_rate'),
+                    elevation_gain=split_data.get('elevation_gain'),
+                    elevation_loss=split_data.get('elevation_loss'),
+                    max_elevation=split_data.get('max_elevation'),
+                    min_elevation=split_data.get('min_elevation'),
+                    avg_cadence=split_data.get('avg_cadence'),
+                    max_cadence=split_data.get('max_cadence'),
+                    calories=split_data.get('calories'),
+                    start_latitude=split_data.get('start_latitude'),
+                    start_longitude=split_data.get('start_longitude'),
+                    end_latitude=split_data.get('end_latitude'),
+                    end_longitude=split_data.get('end_longitude'),
+                    intensity_type=split_data.get('intensity_type'),
+                )
+                session.merge(split)
+            session.commit()
+
+    def get_activity_splits(self, user_id: int, activity_id: str) -> List[Dict[str, Any]]:
+        """Get lap/split data for an activity."""
+        with self.get_session() as session:
+            splits = session.query(ActivitySplit).filter(
+                and_(
+                    ActivitySplit.user_id == user_id,
+                    ActivitySplit.activity_id == activity_id
+                )
+            ).order_by(ActivitySplit.lap_index).all()
+            return [self._split_to_dict(s) for s in splits]
+
+    def get_all_activity_splits(self, user_id: int, start_date: date, end_date: date) -> List[Dict[str, Any]]:
+        """Get all splits for activities in date range."""
+        with self.get_session() as session:
+            # Join with activities to filter by date
+            splits = session.query(ActivitySplit).join(
+                Activity,
+                and_(
+                    ActivitySplit.user_id == Activity.user_id,
+                    ActivitySplit.activity_id == Activity.activity_id
+                )
+            ).filter(
+                and_(
+                    ActivitySplit.user_id == user_id,
+                    Activity.activity_date >= start_date,
+                    Activity.activity_date <= end_date
+                )
+            ).order_by(Activity.activity_date, ActivitySplit.lap_index).all()
+            return [self._split_to_dict(s) for s in splits]
+
+    def activity_has_splits(self, user_id: int, activity_id: str) -> bool:
+        """Check if activity already has splits stored."""
+        with self.get_session() as session:
+            return session.query(ActivitySplit).filter(
+                and_(
+                    ActivitySplit.user_id == user_id,
+                    ActivitySplit.activity_id == activity_id
+                )
+            ).first() is not None
+
+    def _split_to_dict(self, split: ActivitySplit) -> Dict[str, Any]:
+        """Convert ActivitySplit to dictionary."""
+        # Calculate pace in min/km if we have distance and duration
+        pace_min_km = None
+        if split.distance_meters and split.duration_seconds and split.distance_meters > 0:
+            pace_min_km = (split.duration_seconds / 60) / (split.distance_meters / 1000)
+
+        return {
+            'user_id': split.user_id,
+            'activity_id': split.activity_id,
+            'lap_index': split.lap_index,
+            'start_time': split.start_time,
+            'duration_seconds': split.duration_seconds,
+            'moving_duration_seconds': split.moving_duration_seconds,
+            'distance_meters': split.distance_meters,
+            'distance_km': split.distance_meters / 1000 if split.distance_meters else None,
+            'avg_speed': split.avg_speed,
+            'max_speed': split.max_speed,
+            'avg_moving_speed': split.avg_moving_speed,
+            'pace_min_km': pace_min_km,
+            'avg_heart_rate': split.avg_heart_rate,
+            'max_heart_rate': split.max_heart_rate,
+            'elevation_gain': split.elevation_gain,
+            'elevation_loss': split.elevation_loss,
+            'max_elevation': split.max_elevation,
+            'min_elevation': split.min_elevation,
+            'avg_cadence': split.avg_cadence,
+            'max_cadence': split.max_cadence,
+            'calories': split.calories,
+            'start_latitude': split.start_latitude,
+            'start_longitude': split.start_longitude,
+            'end_latitude': split.end_latitude,
+            'end_longitude': split.end_longitude,
+            'intensity_type': split.intensity_type,
+            'created_at': split.created_at
         }

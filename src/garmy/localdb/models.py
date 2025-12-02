@@ -89,6 +89,54 @@ class ExerciseSet(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class ActivitySplit(Base):
+    """Lap/split data from cardio activities (running, cycling, walking, etc.)."""
+    __tablename__ = "activity_splits"
+
+    user_id = Column(Integer, primary_key=True, nullable=False)
+    activity_id = Column(String, primary_key=True, nullable=False)
+    lap_index = Column(Integer, primary_key=True, nullable=False)  # 1-indexed lap number
+
+    # Timing
+    start_time = Column(String)  # ISO timestamp
+    duration_seconds = Column(Float)
+    moving_duration_seconds = Column(Float)
+
+    # Distance and speed
+    distance_meters = Column(Float)
+    avg_speed = Column(Float)  # m/s
+    max_speed = Column(Float)  # m/s
+    avg_moving_speed = Column(Float)  # m/s
+
+    # Heart rate
+    avg_heart_rate = Column(Integer)
+    max_heart_rate = Column(Integer)
+
+    # Elevation
+    elevation_gain = Column(Float)  # meters
+    elevation_loss = Column(Float)  # meters
+    max_elevation = Column(Float)  # meters
+    min_elevation = Column(Float)  # meters
+
+    # Cadence (running/walking)
+    avg_cadence = Column(Float)  # steps per minute
+    max_cadence = Column(Float)  # steps per minute
+
+    # Calories
+    calories = Column(Float)
+
+    # GPS coordinates
+    start_latitude = Column(Float)
+    start_longitude = Column(Float)
+    end_latitude = Column(Float)
+    end_longitude = Column(Float)
+
+    # Type
+    intensity_type = Column(String)  # ACTIVE, REST
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class DailyHealthMetric(Base):
     """Normalized daily health metrics with dedicated columns for efficient querying."""
     __tablename__ = "daily_health_metrics"

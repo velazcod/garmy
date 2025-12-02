@@ -6,7 +6,7 @@ Complete reference for Garmy's LocalDB database schema and structure.
 
 The Garmy LocalDB uses SQLite with optimized tables for health data storage:
 
-- **5 main tables** for different data types
+- **6 main tables** for different data types
 - **Normalized structure** for efficient querying
 - **Dedicated columns** for common health metrics
 - **Sync tracking** for data integrity
@@ -45,6 +45,16 @@ exercise_sets (Strength training sets)
 ├── repetition_count, weight_grams
 ├── set_type, duration_seconds
 └── start_time, created_at
+
+activity_splits (Cardio lap/split data)
+├── user_id, activity_id, lap_index (PK)
+├── start_time, duration_seconds, moving_duration_seconds
+├── distance_meters, avg_speed, max_speed
+├── avg_heart_rate, max_heart_rate
+├── elevation_gain, elevation_loss
+├── avg_cadence, max_cadence, calories
+├── start_latitude, start_longitude, end_latitude, end_longitude
+└── intensity_type, created_at
 
 sync_status (Sync tracking)
 ├── user_id, sync_date, metric_type (PK)
@@ -219,6 +229,66 @@ created_at        DATETIME   -- Record creation time
 - Core: `PLANK`, `CRUNCH`, `RUSSIAN_TWIST`
 - Other: `UNKNOWN` (when Garmin cannot identify the exercise)
 
+### `activity_splits`
+**Purpose:** Lap/split data from cardio activities (running, cycling, walking, swimming, etc.)
+
+**Primary Key:** `(user_id, activity_id, lap_index)`
+
+**Columns:**
+```sql
+-- Identity
+user_id           INTEGER    -- User identifier
+activity_id       STRING     -- Parent activity ID (FK to activities)
+lap_index         INTEGER    -- 1-indexed lap number
+
+-- Timing
+start_time        STRING     -- Lap start timestamp (ISO format)
+duration_seconds  FLOAT      -- Total lap duration
+moving_duration_seconds FLOAT -- Moving time (excludes pauses)
+
+-- Distance and Speed
+distance_meters   FLOAT      -- Distance covered in lap
+avg_speed         FLOAT      -- Average speed (m/s)
+max_speed         FLOAT      -- Maximum speed (m/s)
+avg_moving_speed  FLOAT      -- Average speed while moving (m/s)
+
+-- Heart Rate
+avg_heart_rate    INTEGER    -- Average HR during lap
+max_heart_rate    INTEGER    -- Maximum HR during lap
+
+-- Elevation
+elevation_gain    FLOAT      -- Meters gained in lap
+elevation_loss    FLOAT      -- Meters lost in lap
+max_elevation     FLOAT      -- Highest point (meters)
+min_elevation     FLOAT      -- Lowest point (meters)
+
+-- Cadence (running/walking)
+avg_cadence       FLOAT      -- Average steps per minute
+max_cadence       FLOAT      -- Maximum steps per minute
+
+-- Energy
+calories          FLOAT      -- Calories burned in lap
+
+-- GPS Coordinates
+start_latitude    FLOAT      -- Lap start latitude
+start_longitude   FLOAT      -- Lap start longitude
+end_latitude      FLOAT      -- Lap end latitude
+end_longitude     FLOAT      -- Lap end longitude
+
+-- Type
+intensity_type    STRING     -- Lap type: ACTIVE or REST
+
+-- Metadata
+created_at        DATETIME   -- Record creation time
+```
+
+**Supported Activity Types:**
+- Running: `running`, `treadmill_running`, `trail_running`, `track_running`
+- Cycling: `cycling`, `indoor_cycling`, `virtual_ride`, `gravel_cycling`, `road_cycling`
+- Walking/Hiking: `walking`, `hiking`
+- Swimming: `swimming`, `lap_swimming`, `open_water_swimming`
+- Other: `elliptical`, `stair_climbing`, `rowing`, `indoor_rowing`
+
 ### `sync_status`
 **Purpose:** Track synchronization status for each metric per date
 
@@ -362,6 +432,66 @@ WHERE user_id = 1
     AND weight_grams > 0
 GROUP BY exercise_category
 ORDER BY total_weight_kg DESC;
+```
+
+### Lap/Split Analysis
+```sql
+-- Detailed splits for a specific activity
+SELECT
+    lap_index,
+    distance_meters,
+    duration_seconds,
+    ROUND(duration_seconds / (distance_meters / 1000.0), 1) as pace_sec_per_km,
+    avg_heart_rate,
+    max_heart_rate,
+    elevation_gain,
+    avg_cadence
+FROM activity_splits
+WHERE user_id = 1
+    AND activity_id = '123456789'
+ORDER BY lap_index;
+```
+
+### Running Pace Consistency
+```sql
+-- Analyze pace consistency across runs
+SELECT
+    a.activity_date,
+    a.activity_name,
+    COUNT(s.lap_index) as total_laps,
+    ROUND(AVG(s.duration_seconds / (s.distance_meters / 1000.0)), 1) as avg_pace_sec_km,
+    ROUND(MAX(s.duration_seconds / (s.distance_meters / 1000.0)) -
+          MIN(s.duration_seconds / (s.distance_meters / 1000.0)), 1) as pace_variance
+FROM activities a
+JOIN activity_splits s ON a.activity_id = s.activity_id AND a.user_id = s.user_id
+WHERE a.user_id = 1
+    AND a.activity_type = 'running'
+    AND s.distance_meters > 0
+    AND a.activity_date >= date('now', '-30 days')
+GROUP BY a.activity_id
+ORDER BY a.activity_date DESC;
+```
+
+### Heart Rate Zones Per Lap
+```sql
+-- Analyze HR distribution across laps
+SELECT
+    lap_index,
+    avg_heart_rate,
+    CASE
+        WHEN avg_heart_rate < 120 THEN 'Zone 1 (Easy)'
+        WHEN avg_heart_rate < 140 THEN 'Zone 2 (Aerobic)'
+        WHEN avg_heart_rate < 160 THEN 'Zone 3 (Tempo)'
+        WHEN avg_heart_rate < 175 THEN 'Zone 4 (Threshold)'
+        ELSE 'Zone 5 (Max)'
+    END as hr_zone,
+    distance_meters,
+    duration_seconds
+FROM activity_splits
+WHERE user_id = 1
+    AND activity_id = '123456789'
+    AND avg_heart_rate IS NOT NULL
+ORDER BY lap_index;
 ```
 
 ## 📈 Data Relationships
