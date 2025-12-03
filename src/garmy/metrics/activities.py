@@ -326,6 +326,7 @@ class ActivitiesAccessor:
             raise
         except Exception as e:
             from ..core.utils import handle_api_exception
+
             return handle_api_exception(e, "fetching activity details", endpoint, {})
 
     def get_exercise_sets(self, activity_id: Union[int, str]) -> Dict[str, Any]:
@@ -345,6 +346,7 @@ class ActivitiesAccessor:
             raise
         except Exception as e:
             from ..core.utils import handle_api_exception
+
             return handle_api_exception(e, "fetching exercise sets", endpoint, {})
 
     def get_activity_splits(self, activity_id: Union[int, str]) -> Dict[str, Any]:
@@ -364,6 +366,7 @@ class ActivitiesAccessor:
             raise
         except Exception as e:
             from ..core.utils import handle_api_exception
+
             return handle_api_exception(e, "fetching activity splits", endpoint, {})
 
     # For compatibility with MetricAccessor interface

@@ -1,17 +1,27 @@
 """SQLAlchemy models and enums for health database."""
 
-from datetime import date, datetime
+from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, JSON, Text, Boolean
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import declarative_base
-
 
 Base = declarative_base()
 
 
 class MetricType(Enum):
     """Health metric types that can be stored in the database."""
+
     DAILY_SUMMARY = "daily_summary"
     SLEEP = "sleep"
     ACTIVITIES = "activities"
@@ -23,10 +33,12 @@ class MetricType(Enum):
     RESPIRATION = "respiration"
     STEPS = "steps"
     CALORIES = "calories"
+    BODY_COMPOSITION = "body_composition"
 
 
 class TimeSeries(Base):
     """High-frequency timeseries data (heart rate, stress, body battery, etc.)."""
+
     __tablename__ = "timeseries"
 
     user_id = Column(Integer, primary_key=True, nullable=False)
@@ -38,6 +50,7 @@ class TimeSeries(Base):
 
 class Activity(Base):
     """Individual activities and workouts with key metrics."""
+
     __tablename__ = "activities"
 
     user_id = Column(Integer, primary_key=True, nullable=False)
@@ -72,11 +85,14 @@ class Activity(Base):
 
 class ExerciseSet(Base):
     """Exercise sets from strength training activities."""
+
     __tablename__ = "exercise_sets"
 
     user_id = Column(Integer, primary_key=True, nullable=False)
     activity_id = Column(String, primary_key=True, nullable=False)
-    set_order = Column(Integer, primary_key=True, nullable=False)  # Order within activity
+    set_order = Column(
+        Integer, primary_key=True, nullable=False
+    )  # Order within activity
 
     exercise_category = Column(String)  # CURL, BENCH_PRESS, SQUAT, etc.
     exercise_name = Column(String)
@@ -91,11 +107,14 @@ class ExerciseSet(Base):
 
 class ActivitySplit(Base):
     """Lap/split data from cardio activities (running, cycling, walking, etc.)."""
+
     __tablename__ = "activity_splits"
 
     user_id = Column(Integer, primary_key=True, nullable=False)
     activity_id = Column(String, primary_key=True, nullable=False)
-    lap_index = Column(Integer, primary_key=True, nullable=False)  # 1-indexed lap number
+    lap_index = Column(
+        Integer, primary_key=True, nullable=False
+    )  # 1-indexed lap number
 
     # Timing
     start_time = Column(String)  # ISO timestamp
@@ -139,6 +158,7 @@ class ActivitySplit(Base):
 
 class DailyHealthMetric(Base):
     """Normalized daily health metrics with dedicated columns for efficient querying."""
+
     __tablename__ = "daily_health_metrics"
 
     user_id = Column(Integer, primary_key=True, nullable=False)
@@ -190,12 +210,23 @@ class DailyHealthMetric(Base):
     lowest_respiration_value = Column(Float)
     highest_respiration_value = Column(Float)
 
+    # Sleep enhancements
+    sleep_score = Column(Integer)  # 0-100 overall score
+    sleep_score_qualifier = Column(String)  # POOR, FAIR, GOOD, EXCELLENT
+    sleep_bedtime = Column(String)  # ISO timestamp string
+    sleep_wake_time = Column(String)  # ISO timestamp string
+    sleep_need_minutes = Column(Integer)  # Target sleep in minutes
+
+    # Skin temperature (Celsius only - Fahrenheit computed on read)
+    skin_temp_deviation_c = Column(Float)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class SyncStatus(Base):
     """Sync status tracking for each metric per date."""
+
     __tablename__ = "sync_status"
 
     user_id = Column(Integer, primary_key=True, nullable=False)
@@ -204,4 +235,32 @@ class SyncStatus(Base):
     status = Column(String, nullable=False)
     synced_at = Column(DateTime)
     error_message = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class BodyComposition(Base):
+    """Body composition measurements from smart scales."""
+
+    __tablename__ = "body_composition"
+
+    user_id = Column(Integer, primary_key=True, nullable=False)
+    sample_pk = Column(String, primary_key=True, nullable=False)  # Garmin's unique ID
+    measurement_date = Column(Date, nullable=False, index=True)
+    timestamp_gmt = Column(DateTime)
+
+    # Core measurements
+    weight_grams = Column(Float)
+    bmi = Column(Float)
+    body_fat_percentage = Column(Float)
+    body_water_percentage = Column(Float)
+    bone_mass_grams = Column(Float)
+    muscle_mass_grams = Column(Float)
+
+    # Additional metrics (may be null depending on scale)
+    visceral_fat = Column(Float)
+    metabolic_age = Column(Integer)
+    physique_rating = Column(Float)
+
+    # Metadata
+    source_type = Column(String)  # e.g., "INDEX_SCALE"
     created_at = Column(DateTime, default=datetime.utcnow)

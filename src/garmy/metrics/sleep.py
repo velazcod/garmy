@@ -124,9 +124,11 @@ class SleepSummary(TimestampMixin):
     @property
     def sleep_efficiency_percentage(self) -> Optional[float]:
         """Calculate sleep efficiency (sleep time / time in bed)."""
-        if (self.sleep_end_timestamp_local is None or
-            self.sleep_start_timestamp_local is None or
-            self.sleep_time_seconds is None):
+        if (
+            self.sleep_end_timestamp_local is None
+            or self.sleep_start_timestamp_local is None
+            or self.sleep_time_seconds is None
+        ):
             return None
         time_in_bed = (
             self.sleep_end_timestamp_local - self.sleep_start_timestamp_local
@@ -150,6 +152,9 @@ class Sleep:
         wellness_epoch_spo2_data_dto_list: SpO2 readings throughout the night (list of dicts)
         wellness_epoch_respiration_data_dto_list: Respiration readings throughout the night
             (list of dicts)
+        skin_temp_data_exists: Whether skin temperature data is available
+        skin_temp_deviation_c: Skin temperature deviation in Celsius
+        skin_temp_deviation_f: Skin temperature deviation in Fahrenheit
 
     Example:
         >>> sleep = garmy.sleep.get()
@@ -170,6 +175,11 @@ class Sleep:
     wellness_epoch_respiration_data_dto_list: List[Dict[str, Any]] = field(
         default_factory=list
     )
+
+    # Top-level skin temperature fields
+    skin_temp_data_exists: bool = False
+    skin_temp_deviation_c: Optional[float] = None
+    skin_temp_deviation_f: Optional[float] = None
 
     def __str__(self) -> str:
         """Format sleep data for human-readable display."""
@@ -266,17 +276,34 @@ class Sleep:
         return len(self.sleep_movement)
 
 
-# Create parser using factory function for nested summary + raw data
-parse_sleep_data = create_nested_summary_parser(
-    Sleep,
-    SleepSummary,
-    "daily_sleep_dto",
-    [
-        "sleep_movement",
-        "wellness_epoch_spo2_data_dto_list",
-        "wellness_epoch_respiration_data_dto_list",
-    ],
-)
+def parse_sleep_data(data: Dict[str, Any]) -> Sleep:
+    """Parse sleep data including top-level skin temperature fields.
+
+    This custom parser extends the standard nested summary parser to also
+    capture skin temperature data that exists at the top level of the
+    API response (not nested in dailySleepDTO).
+    """
+    # Use existing parser for nested summary and base data
+    base_parser = create_nested_summary_parser(
+        Sleep,
+        SleepSummary,
+        "daily_sleep_dto",
+        [
+            "sleep_movement",
+            "wellness_epoch_spo2_data_dto_list",
+            "wellness_epoch_respiration_data_dto_list",
+        ],
+    )
+
+    # Parse base data
+    sleep = base_parser(data)
+
+    # Add top-level skin temp fields (these are outside dailySleepDTO)
+    sleep.skin_temp_data_exists = data.get("skinTempDataExists", False)
+    sleep.skin_temp_deviation_c = data.get("avgSkinTempDeviationC")
+    sleep.skin_temp_deviation_f = data.get("avgSkinTempDeviationF")
+
+    return sleep
 
 
 def build_sleep_endpoint(
