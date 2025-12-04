@@ -20,6 +20,39 @@ except ImportError:
         )
 
 
+def resolve_db_path(args) -> Optional[str]:
+    """Resolve database path from arguments.
+
+    Priority:
+    1. --database CLI argument
+    2. --profile-path CLI argument (derives <profile>/health.db)
+    3. GARMY_PROFILE_PATH environment variable (derives <profile>/health.db)
+    4. GARMY_DB_PATH environment variable
+
+    Args:
+        args: Parsed command-line arguments
+
+    Returns:
+        Database path string or None if not resolvable
+    """
+    # Priority 1: Explicit database path
+    if args.database:
+        return args.database
+
+    # Priority 2: Profile path from CLI
+    profile_path = getattr(args, "profile_path", None)
+    if profile_path:
+        return str(Path(profile_path).expanduser() / "health.db")
+
+    # Priority 3: Profile path from environment
+    env_profile = os.environ.get("GARMY_PROFILE_PATH")
+    if env_profile:
+        return str(Path(env_profile).expanduser() / "health.db")
+
+    # Priority 4: Database path from environment
+    return os.environ.get("GARMY_DB_PATH")
+
+
 def validate_database_path(db_path: str) -> Path:
     """Validate database path exists and is accessible.
 
@@ -49,12 +82,13 @@ def validate_database_path(db_path: str) -> Path:
 
 def cmd_server(args):
     """Start MCP server with specified configuration."""
-    # Determine database path
-    db_path_str = args.database or os.environ.get("GARMY_DB_PATH")
+    # Resolve database path from arguments/environment
+    db_path_str = resolve_db_path(args)
 
     if not db_path_str:
         print(
-            "Error: Database path must be provided via --database argument or GARMY_DB_PATH environment variable",
+            "Error: Database path must be provided via --database, --profile-path, "
+            "or GARMY_DB_PATH/GARMY_PROFILE_PATH environment variable",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -121,12 +155,13 @@ def cmd_server(args):
 
 def cmd_info(args):
     """Show information about the database and MCP server configuration."""
-    # Determine database path
-    db_path_str = args.database or os.environ.get("GARMY_DB_PATH")
+    # Resolve database path from arguments/environment
+    db_path_str = resolve_db_path(args)
 
     if not db_path_str:
         print(
-            "Error: Database path must be provided via --database argument or GARMY_DB_PATH environment variable",
+            "Error: Database path must be provided via --database, --profile-path, "
+            "or GARMY_DB_PATH/GARMY_PROFILE_PATH environment variable",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -191,6 +226,7 @@ def cmd_config(args):
 
     print("\\n📋 Basic Usage:")
     print("  garmy-mcp server --database health.db")
+    print("  garmy-mcp server --profile-path ~/Services/Garmy/profiles/user1")
 
     print("\\n🏭 Production Configuration (restrictive):")
     print("  garmy-mcp server --database health.db \\\\")
@@ -210,6 +246,17 @@ def cmd_config(args):
     print("    --verbose")
 
     print("\\n🤖 Claude Desktop Integration:")
+    print("  {")
+    print('    "mcpServers": {')
+    print('      "garmy-localdb": {')
+    print('        "command": "garmy-mcp",')
+    print(
+        '        "args": ["server", "--profile-path", "/path/to/profiles/user1", "--max-rows", "500"]'
+    )
+    print("      }")
+    print("    }")
+    print("  }")
+    print("\\n  Or with direct database path:")
     print("  {")
     print('    "mcpServers": {')
     print('      "garmy-localdb": {')
@@ -239,9 +286,14 @@ def create_parser():
         epilog="""
 Examples:
   garmy-mcp server --database health.db
+  garmy-mcp server --profile-path ~/profiles/user1
   garmy-mcp info --database health.db
   garmy-mcp config
-  
+
+Environment Variables:
+  GARMY_PROFILE_PATH    Profile directory path (derives database as <profile>/health.db)
+  GARMY_DB_PATH         Direct database path
+
 Use 'garmy-mcp <command> --help' for command-specific help.
         """,
     )
@@ -257,6 +309,12 @@ Use 'garmy-mcp <command> --help' for command-specific help.
         description="Start the MCP server with specified configuration",
     )
 
+    server_parser.add_argument(
+        "--profile-path",
+        type=str,
+        help="Path to profile directory. Database path derived as <profile>/health.db. "
+        "Can also be set via GARMY_PROFILE_PATH environment variable.",
+    )
     server_parser.add_argument(
         "--database", "-d", type=str, help="Path to Garmin LocalDB SQLite database file"
     )
@@ -303,6 +361,12 @@ Use 'garmy-mcp <command> --help' for command-specific help.
         description="Display information about the database and available MCP tools",
     )
 
+    info_parser.add_argument(
+        "--profile-path",
+        type=str,
+        help="Path to profile directory. Database path derived as <profile>/health.db. "
+        "Can also be set via GARMY_PROFILE_PATH environment variable.",
+    )
     info_parser.add_argument(
         "--database", "-d", type=str, help="Path to Garmin LocalDB SQLite database file"
     )

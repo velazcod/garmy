@@ -3,15 +3,57 @@
 
 import argparse
 import getpass
+import os
 import sys
 from datetime import date, timedelta
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from .config import LocalDBConfig
 from .models import MetricType
 from .progress import ProgressReporter
 from .sync import SyncManager
+
+
+def resolve_paths(args: argparse.Namespace) -> Tuple[Path, Optional[str]]:
+    """Resolve database path and token directory from arguments.
+
+    Priority for profile path:
+    1. --profile-path CLI argument
+    2. GARMY_PROFILE_PATH environment variable
+
+    When profile path is set:
+    - db_path = <profile>/health.db
+    - token_dir = <profile>/
+
+    When profile path is not set:
+    - db_path = --db-path argument or default (health.db)
+    - token_dir = None (uses default ~/.garmy/)
+
+    Args:
+        args: Parsed command-line arguments
+
+    Returns:
+        Tuple of (db_path, token_dir)
+    """
+    # Check for profile path (CLI takes precedence over env var)
+    profile_path = args.profile_path
+    if profile_path is None:
+        env_profile = os.getenv("GARMY_PROFILE_PATH")
+        if env_profile:
+            profile_path = Path(env_profile).expanduser()
+
+    if profile_path:
+        # Use profile path for both database and tokens
+        profile_path = Path(profile_path).expanduser()
+        db_path = profile_path / "health.db"
+        token_dir = str(profile_path)
+        return db_path, token_dir
+    else:
+        # Use individual paths
+        db_path = args.db_path if args.db_path else Path("health.db")
+        token_dir = None  # Will use default ~/.garmy/
+        return db_path, token_dir
 
 
 def parse_date(date_str: str) -> date:
@@ -66,6 +108,9 @@ def get_credentials() -> tuple[str, str]:
 def cmd_sync(args) -> int:
     """Execute sync command."""
     try:
+        # Resolve paths from profile or individual arguments
+        db_path, token_dir = resolve_paths(args)
+
         # Determine date range
         if args.last_days:
             end_date = date.today()
@@ -78,6 +123,7 @@ def cmd_sync(args) -> int:
             start_date = end_date - timedelta(days=6)
 
         print(f"Syncing data from {start_date} to {end_date}")
+        print(f"Database: {db_path}")
 
         # Setup progress reporter
         progress_reporter = ProgressReporter(use_tqdm=args.progress == "tqdm")
@@ -85,7 +131,10 @@ def cmd_sync(args) -> int:
         # Initialize sync manager
         config = LocalDBConfig()
         manager = SyncManager(
-            db_path=args.db_path, config=config, progress_reporter=progress_reporter
+            db_path=db_path,
+            config=config,
+            progress_reporter=progress_reporter,
+            token_dir=token_dir,
         )
 
         # Try to initialize with saved tokens first
@@ -133,7 +182,9 @@ def cmd_status(args) -> int:
     try:
         from .db import HealthDB
 
-        db = HealthDB(args.db_path)
+        # Resolve paths from profile or individual arguments
+        db_path, _ = resolve_paths(args)
+        db = HealthDB(db_path)
 
         # Show overall statistics
         with db.get_session() as session:
@@ -229,7 +280,9 @@ def cmd_reset(args) -> int:
     try:
         from .db import HealthDB
 
-        db = HealthDB(args.db_path)
+        # Resolve paths from profile or individual arguments
+        db_path, _ = resolve_paths(args)
+        db = HealthDB(db_path)
 
         with db.get_session() as session:
             from .models import SyncStatus
@@ -272,13 +325,19 @@ def cmd_reset(args) -> int:
 def cmd_backfill(args) -> int:
     """Backfill activity details for existing activities."""
     try:
+        # Resolve paths from profile or individual arguments
+        db_path, token_dir = resolve_paths(args)
+
         # Setup progress reporter
         progress_reporter = ProgressReporter(use_tqdm=args.progress == "tqdm")
 
         # Initialize sync manager
         config = LocalDBConfig()
         manager = SyncManager(
-            db_path=args.db_path, config=config, progress_reporter=progress_reporter
+            db_path=db_path,
+            config=config,
+            progress_reporter=progress_reporter,
+            token_dir=token_dir,
         )
 
         # Try to initialize with saved tokens first
@@ -317,13 +376,19 @@ def cmd_backfill(args) -> int:
 def cmd_backfill_splits(args) -> int:
     """Backfill splits for cardio activities."""
     try:
+        # Resolve paths from profile or individual arguments
+        db_path, token_dir = resolve_paths(args)
+
         # Setup progress reporter
         progress_reporter = ProgressReporter(use_tqdm=args.progress == "tqdm")
 
         # Initialize sync manager
         config = LocalDBConfig()
         manager = SyncManager(
-            db_path=args.db_path, config=config, progress_reporter=progress_reporter
+            db_path=db_path,
+            config=config,
+            progress_reporter=progress_reporter,
+            token_dir=token_dir,
         )
 
         # Try to initialize with saved tokens first
@@ -368,19 +433,32 @@ Examples:
   %(prog)s sync --last-days 7                    # Sync last 7 days
   %(prog)s sync --date-range 2024-01-01 2024-01-31  # Sync date range
   %(prog)s sync --metrics DAILY_SUMMARY,SLEEP    # Sync specific metrics
+  %(prog)s sync --profile-path ~/profiles/user1  # Sync using profile directory
   %(prog)s status                                 # Show sync status
   %(prog)s reset --force                         # Reset failed records
   %(prog)s backfill --limit 50                   # Backfill activity details
   %(prog)s backfill-splits --limit 50            # Backfill splits for cardio
+
+Environment Variables:
+  GARMY_PROFILE_PATH    Profile directory path (contains tokens and database)
         """,
     )
 
     # Global options
     parser.add_argument(
+        "--profile-path",
+        type=Path,
+        default=None,
+        help="Path to profile directory containing tokens and database. "
+        "When set, uses <profile>/health.db for database and <profile>/ for tokens. "
+        "Can also be set via GARMY_PROFILE_PATH environment variable.",
+    )
+    parser.add_argument(
         "--db-path",
         type=Path,
-        default=Path("health.db"),
-        help="Path to SQLite database file (default: health.db)",
+        default=None,
+        help="Path to SQLite database file. If --profile-path is set, this is ignored. "
+        "(default: health.db in current directory or profile directory)",
     )
     parser.add_argument(
         "--user-id",

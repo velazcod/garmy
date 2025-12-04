@@ -15,6 +15,7 @@ An AI-powered Python library for Garmin Connect API designed specifically for he
 - **🏥 Health Analytics**: Advanced data analysis capabilities for fitness and wellness insights
 - **📊 Rich Metrics**: Complete access to sleep, heart rate, stress, training readiness, and more
 - **💾 Local Database**: Built-in SQLite database for local health data storage and sync
+- **👥 Multi-Profile Support**: Manage multiple Garmin accounts with isolated profile directories
 - **🖥️ CLI Tools**: Command-line interfaces for data synchronization and MCP server management
 - **🤖 MCP Server**: Model Context Protocol server for AI assistant integration (Claude Desktop)
 - **⚡ High Performance**: Optimized for high-performance AI applications
@@ -89,6 +90,37 @@ garmy-mcp info --database health.db
 garmy-mcp config
 ```
 
+### Multi-Profile Support
+
+Garmy supports multiple Garmin accounts through profile directories. Each profile contains its own authentication tokens and database.
+
+```bash
+# Using --profile-path (note: must come before the subcommand)
+garmy-sync --profile-path ~/profiles/user1 sync --last-days 7
+garmy-sync --profile-path ~/profiles/user2 sync --last-days 7
+
+# Using environment variable
+export GARMY_PROFILE_PATH=~/profiles/user1
+garmy-sync sync --last-days 7
+
+# MCP server with profile
+garmy-mcp server --profile-path ~/profiles/user1
+```
+
+**Profile Directory Structure:**
+```
+~/profiles/user1/
+├── oauth1_token.json    # Garmin OAuth1 credentials
+├── oauth2_token.json    # Garmin OAuth2 credentials
+├── health.db            # User's health database
+└── logs/                # Sync logs
+```
+
+**Priority Order:**
+1. `--profile-path` CLI argument (highest)
+2. `GARMY_PROFILE_PATH` environment variable
+3. `~/.garmy/` default directory (fallback)
+
 ### AI Assistant Integration (Claude Desktop)
 
 Add to your Claude Desktop configuration (`~/.claude_desktop_config.json`):
@@ -99,6 +131,35 @@ Add to your Claude Desktop configuration (`~/.claude_desktop_config.json`):
     "garmy-localdb": {
       "command": "garmy-mcp",
       "args": ["server", "--database", "/path/to/health.db", "--max-rows", "500"]
+    }
+  }
+}
+```
+
+**Using profiles with Claude Desktop:**
+
+```json
+{
+  "mcpServers": {
+    "garmy-localdb": {
+      "command": "garmy-mcp",
+      "args": ["server", "--profile-path", "/path/to/profiles/user1", "--max-rows", "500"]
+    }
+  }
+}
+```
+
+Or using environment variables:
+
+```json
+{
+  "mcpServers": {
+    "garmy-localdb": {
+      "command": "garmy-mcp",
+      "args": ["server", "--max-rows", "500"],
+      "env": {
+        "GARMY_PROFILE_PATH": "/path/to/profiles/user1"
+      }
     }
   }
 }
@@ -187,14 +248,25 @@ def health_agent():
 garmy-sync sync --last-days 90  # Sync 3 months of data
 garmy-mcp server --database health.db  # Start MCP server
 # Use Claude Desktop or Python to analyze trends, correlations, patterns
+
+# Multi-user household analysis
+garmy-sync --profile-path ~/profiles/user1 sync --last-days 90
+garmy-sync --profile-path ~/profiles/user2 sync --last-days 90
+# Each profile has isolated credentials and database
 ```
 
-### For Health Researchers  
+### For Health Researchers
 ```python
 # Large-scale health data collection
 from garmy.localdb import SyncManager
+from pathlib import Path
 
-sync_manager = SyncManager(db_path="research_data.db")
+# Using a profile directory for tokens and database
+profile_path = Path.home() / "profiles" / "researcher"
+sync_manager = SyncManager(
+    db_path=profile_path / "health.db",
+    token_dir=str(profile_path)  # Tokens stored in profile directory
+)
 sync_manager.initialize(email, password)
 
 # Collect comprehensive health dataset
@@ -213,6 +285,28 @@ stats = sync_manager.sync_range(
 - **🛡️ Query Validation**: SQL injection prevention and query limits
 - **🔑 Secure Auth**: OAuth token management with automatic refresh
 - **🚫 No Data Sharing**: Health data never leaves your local environment
+- **👥 Profile Isolation**: Each profile has separate credentials and database
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `GARMY_PROFILE_PATH` | Profile directory path (contains tokens and database) |
+| `GARMY_DB_PATH` | Database file path (for MCP server, overridden by `--database`) |
+
+### Shell Configuration Example
+
+Add to your `~/.zshrc` or `~/.bashrc`:
+
+```bash
+# Set default profile
+export GARMY_PROFILE_PATH="$HOME/Services/Garmy/profiles/default"
+
+# Optional: Activate venv alias
+alias garmy-activate="source ~/Services/Garmy/.venv/bin/activate"
+```
 
 ## 🧪 Examples
 

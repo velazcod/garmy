@@ -22,6 +22,7 @@ class SyncManager:
         db_path: Path = Path("health.db"),
         config: Optional[LocalDBConfig] = None,
         progress_reporter: Optional[ProgressReporter] = None,
+        token_dir: Optional[str] = None,
     ):
         """Initialize sync manager.
 
@@ -29,9 +30,15 @@ class SyncManager:
             db_path: Path to SQLite database file.
             config: Configuration object.
             progress_reporter: Custom progress reporter.
+            token_dir: Directory path for authentication tokens.
+                       Resolution priority:
+                       1. This parameter if provided
+                       2. GARMY_PROFILE_PATH environment variable
+                       3. Default: ~/.garmy/
         """
         self.db_path = db_path
         self.config = config if config is not None else LocalDBConfig()
+        self.token_dir = token_dir
 
         self.db = HealthDB(db_path, self.config.database)
         self.progress = progress_reporter or ProgressReporter()
@@ -50,7 +57,7 @@ class SyncManager:
         try:
             from garmy import APIClient, AuthClient
 
-            auth_client = AuthClient()
+            auth_client = AuthClient(token_dir=self.token_dir)
 
             # Check if already authenticated with saved tokens
             if not auth_client.is_authenticated:
