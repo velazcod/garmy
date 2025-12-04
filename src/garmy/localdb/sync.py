@@ -406,6 +406,31 @@ class SyncManager:
                 if splits:
                     self.db.store_activity_splits(user_id, activity_id, splits)
 
+                    # Calculate totals from splits and update activity record
+                    summary = self.extractor.calculate_splits_summary(splits)
+                    activity_updates = {}
+
+                    # Update distance if available from splits
+                    if summary.get("total_distance_meters"):
+                        activity_updates["distance_meters"] = summary[
+                            "total_distance_meters"
+                        ]
+
+                    # Update calories if available from splits
+                    if summary.get("total_calories"):
+                        activity_updates["calories"] = int(summary["total_calories"])
+
+                    # Update elevation if available from splits
+                    if summary.get("total_elevation_gain"):
+                        activity_updates["elevation_gain"] = summary[
+                            "total_elevation_gain"
+                        ]
+
+                    if activity_updates:
+                        self.db.update_activity_details(
+                            user_id, activity_id, activity_updates
+                        )
+
         except Exception as e:
             self.progress.warning(
                 f"Failed to sync splits for activity {activity_id}: {e}"
@@ -573,6 +598,101 @@ class SyncManager:
             f"Splits backfill complete: {stats['completed']} succeeded, {stats['skipped']} skipped, {stats['failed']} failed"
         )
         return stats
+
+    def backfill_activity_distance_from_splits(self, user_id: int) -> Dict[str, int]:
+        """Backfill distance/calories/elevation for activities from existing splits.
+
+        This updates activities that have splits stored but don't have distance
+        populated in the main activities table. Useful for fixing activities
+        synced before this feature was added.
+
+        Args:
+            user_id: User identifier
+
+        Returns:
+            Dict with update statistics
+        """
+        stats = {"updated": 0, "skipped": 0, "failed": 0, "total": 0}
+
+        # Get activities that have splits but NULL distance
+        activities = self._get_activities_with_splits_missing_distance(user_id)
+        stats["total"] = len(activities)
+
+        self.progress.info(
+            f"Backfilling distance for {len(activities)} activities from splits"
+        )
+
+        for activity in activities:
+            activity_id = activity["activity_id"]
+            try:
+                # Get splits for this activity
+                splits = self.db.get_activity_splits(user_id, activity_id)
+                if not splits:
+                    stats["skipped"] += 1
+                    continue
+
+                # Calculate totals from splits
+                summary = self.extractor.calculate_splits_summary(splits)
+                activity_updates = {}
+
+                if summary.get("total_distance_meters"):
+                    activity_updates["distance_meters"] = summary["total_distance_meters"]
+
+                if summary.get("total_calories"):
+                    activity_updates["calories"] = int(summary["total_calories"])
+
+                if summary.get("total_elevation_gain"):
+                    activity_updates["elevation_gain"] = summary["total_elevation_gain"]
+
+                if activity_updates:
+                    self.db.update_activity_details(user_id, activity_id, activity_updates)
+                    stats["updated"] += 1
+                else:
+                    stats["skipped"] += 1
+
+            except Exception as e:
+                self.progress.warning(
+                    f"Failed to backfill distance for activity {activity_id}: {e}"
+                )
+                stats["failed"] += 1
+
+        self.progress.info(
+            f"Distance backfill complete: {stats['updated']} updated, "
+            f"{stats['skipped']} skipped, {stats['failed']} failed"
+        )
+        return stats
+
+    def _get_activities_with_splits_missing_distance(
+        self, user_id: int
+    ) -> List[Dict[str, Any]]:
+        """Get activities that have splits but no distance in main table."""
+        with self.db.get_session() as session:
+            from sqlalchemy import and_, exists
+
+            from .models import Activity, ActivitySplit
+
+            # Subquery to find activities with splits
+            has_splits = exists().where(
+                and_(
+                    ActivitySplit.user_id == Activity.user_id,
+                    ActivitySplit.activity_id == Activity.activity_id,
+                )
+            )
+
+            activities = (
+                session.query(Activity)
+                .filter(
+                    and_(
+                        Activity.user_id == user_id,
+                        Activity.distance_meters.is_(None),
+                        has_splits,
+                    )
+                )
+                .order_by(Activity.activity_date.desc())
+                .all()
+            )
+
+            return [self.db._activity_to_dict(a) for a in activities]
 
     def _get_cardio_activities_without_splits(
         self, user_id: int, limit: int

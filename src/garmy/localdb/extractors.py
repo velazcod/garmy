@@ -545,7 +545,11 @@ class DataExtractor:
         Returns:
             Dict with total_laps and aggregated metrics
         """
-        active_splits = [s for s in splits if s.get("intensity_type") == "ACTIVE"]
+        # Include ACTIVE, INTERVAL, and other non-REST splits
+        # (treadmill runs use INTERVAL, outdoor runs use ACTIVE)
+        active_splits = [
+            s for s in splits if s.get("intensity_type") not in (None, "REST")
+        ]
 
         if not active_splits:
             return {"total_laps": len(splits)}
