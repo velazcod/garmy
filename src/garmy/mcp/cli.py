@@ -116,6 +116,45 @@ def cmd_server(args):
             )
             sys.exit(1)
 
+        # Validate transport configuration
+        if args.transport in ("http", "sse"):
+            # Validate port range
+            if args.port < 1 or args.port > 65535:
+                print("Error: --port must be between 1 and 65535", file=sys.stderr)
+                sys.exit(1)
+
+            # Warn about privileged ports
+            if args.port < 1024:
+                print(
+                    "Warning: Ports below 1024 may require root privileges",
+                    file=sys.stderr,
+                )
+
+            # Security warning for network exposure
+            if args.host == "0.0.0.0":
+                print("=" * 60, file=sys.stderr)
+                print("⚠️  SECURITY WARNING", file=sys.stderr)
+                print("=" * 60, file=sys.stderr)
+                print(
+                    "Binding to 0.0.0.0 exposes the server to your entire network.",
+                    file=sys.stderr,
+                )
+                print(
+                    "The MCP protocol does not provide authentication or encryption.",
+                    file=sys.stderr,
+                )
+                print(
+                    "Anyone on your network can access your health data.",
+                    file=sys.stderr,
+                )
+                print("", file=sys.stderr)
+                print("Recommendations:", file=sys.stderr)
+                print("  - Use firewall rules to restrict access", file=sys.stderr)
+                print("  - Use SSH tunneling for remote access", file=sys.stderr)
+                print("  - Consider using 127.0.0.1 for localhost-only", file=sys.stderr)
+                print("=" * 60, file=sys.stderr)
+                print("", file=sys.stderr)
+
         # Create config with CLI parameters
         config = MCPConfig(
             db_path=db_path,
@@ -123,24 +162,56 @@ def cmd_server(args):
             max_rows_absolute=args.max_rows_absolute,
             enable_query_logging=args.enable_query_logging,
             strict_validation=not args.disable_strict_validation,
+            transport=args.transport,
+            host=args.host,
+            port=args.port,
         )
 
         if args.verbose:
-            print(f"Starting Garmin LocalDB MCP Server...")
+            print("Starting Garmin LocalDB MCP Server...")
             print(f"Database: {db_path}")
-            print(f"Configuration:")
+            print("Configuration:")
             print(f"  - Read-only access: enabled")
             print(f"  - Max rows per query: {config.max_rows}")
             print(f"  - Max rows absolute limit: {config.max_rows_absolute}")
             print(f"  - Query logging: {config.enable_query_logging}")
             print(f"  - Strict validation: {config.strict_validation}")
+            print(f"  - Transport: {config.transport}")
+
+            # Show network details for non-stdio transports
+            if config.transport in ("http", "sse"):
+                print(f"  - Host: {config.host}")
+                print(f"  - Port: {config.port}")
+                print("")
+                print("Network Access:")
+                print(f"  - Server URL: http://{config.host}:{config.port}")
+                if config.transport == "sse":
+                    print(f"  - SSE Endpoint: http://{config.host}:{config.port}/sse")
+                print("")
+                if config.host == "127.0.0.1":
+                    print("Note: Server bound to localhost only (127.0.0.1)")
+                    print("      Use --host 0.0.0.0 for network access")
+                elif config.host == "0.0.0.0":
+                    print("WARNING: Server exposed on ALL network interfaces")
+                print("")
+
             print(
-                f"Available tools: explore_database_structure, get_table_details, execute_sql_query, get_health_summary"
+                "Available tools: explore_database_structure, get_table_details, "
+                "execute_sql_query, get_health_summary"
             )
 
         # Create and run server with explicit config
         mcp_server = create_mcp_server(config)
-        mcp_server.run()
+
+        # Run with transport configuration
+        if config.transport == "stdio":
+            mcp_server.run()
+        else:
+            mcp_server.run(
+                transport=config.transport,
+                host=config.host,
+                port=config.port,
+            )
 
     except (FileNotFoundError, PermissionError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -224,57 +295,62 @@ def cmd_config(args):
     print("Garmin LocalDB MCP Server - Configuration Examples")
     print("=" * 50)
 
-    print("\\n📋 Basic Usage:")
+    print("\n📋 Basic Usage (stdio - for Claude Desktop):")
     print("  garmy-mcp server --database health.db")
     print("  garmy-mcp server --profile-path ~/Services/Garmy/profiles/user1")
 
-    print("\\n🏭 Production Configuration (restrictive):")
+    print("\n🌐 Network Usage (HTTP transport):")
+    print("  # Localhost only (secure)")
+    print("  garmy-mcp server --database health.db --transport http --port 8000")
+    print("")
+    print("  # Local network (WARNING: no authentication)")
+    print("  garmy-mcp server --database health.db --transport http \\\\")
+    print("    --host 0.0.0.0 --port 8080")
+
+    print("\n🔒 Secure Remote Access (via SSH tunnel):")
+    print("  # On remote server:")
+    print("  garmy-mcp server --database health.db --transport http --port 8000")
+    print("")
+    print("  # On local machine:")
+    print("  ssh -L 8000:localhost:8000 user@remote-server")
+    print("  # Then connect to http://localhost:8000 locally")
+
+    print("\n🏭 Production Configuration (restrictive):")
     print("  garmy-mcp server --database health.db \\\\")
     print("    --max-rows 100 \\\\")
     print("    --max-rows-absolute 500")
 
-    print("\\n🔧 Development Configuration (permissive with logging):")
+    print("\n🔧 Development Configuration (permissive with logging):")
     print("  garmy-mcp server --database health.db \\\\")
+    print("    --transport http --port 8000 \\\\")
     print("    --max-rows 2000 \\\\")
     print("    --enable-query-logging \\\\")
     print("    --verbose")
 
-    print("\\n🐛 Debug Configuration (relaxed validation):")
-    print("  garmy-mcp server --database health.db \\\\")
-    print("    --disable-strict-validation \\\\")
-    print("    --enable-query-logging \\\\")
-    print("    --verbose")
-
-    print("\\n🤖 Claude Desktop Integration:")
+    print("\n🤖 Claude Desktop Integration (stdio):")
     print("  {")
     print('    "mcpServers": {')
     print('      "garmy-localdb": {')
     print('        "command": "garmy-mcp",')
     print(
-        '        "args": ["server", "--profile-path", "/path/to/profiles/user1", "--max-rows", "500"]'
-    )
-    print("      }")
-    print("    }")
-    print("  }")
-    print("\\n  Or with direct database path:")
-    print("  {")
-    print('    "mcpServers": {')
-    print('      "garmy-localdb": {')
-    print('        "command": "garmy-mcp",')
-    print(
-        '        "args": ["server", "--database", "/path/to/health.db", "--max-rows", "500"]'
+        '        "args": ["server", "--profile-path", "/path/to/profiles/user1"]'
     )
     print("      }")
     print("    }")
     print("  }")
 
-    print("\\n🔐 Security Settings:")
+    print("\n🔐 Security Settings:")
     print("  --max-rows: Limit rows per query (default: 1000, max: 5000)")
     print("  --max-rows-absolute: Hard security limit (default: 5000, max: 10000)")
     print("  --enable-query-logging: Log all SQL queries for debugging")
-    print(
-        "  --disable-strict-validation: Allow relaxed SQL validation (not recommended)"
-    )
+
+    print("\n🌐 Network Transport Settings:")
+    print("  --transport: stdio (default), http (recommended), or sse (legacy)")
+    print("  --host: IP address to bind (default: 127.0.0.1)")
+    print("  --port: Port number (default: 8000)")
+    print("")
+    print("  WARNING: Network transports expose health data without authentication.")
+    print("  Use localhost binding (127.0.0.1) and SSH tunneling for remote access.")
 
 
 def create_parser():
@@ -285,14 +361,27 @@ def create_parser():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Local stdio transport (default, for Claude Desktop)
   garmy-mcp server --database health.db
   garmy-mcp server --profile-path ~/profiles/user1
+
+  # HTTP network transport
+  garmy-mcp server --database health.db --transport http --port 8000
+
+  # HTTP on local network (all interfaces)
+  garmy-mcp server --database health.db --transport http --host 0.0.0.0 --port 8080
+
+  # Info and config commands
   garmy-mcp info --database health.db
   garmy-mcp config
 
 Environment Variables:
   GARMY_PROFILE_PATH    Profile directory path (derives database as <profile>/health.db)
   GARMY_DB_PATH         Direct database path
+
+Security Note:
+  Network transports (http/sse) expose health data without authentication.
+  Use localhost binding (127.0.0.1) and SSH tunneling for remote access.
 
 Use 'garmy-mcp <command> --help' for command-specific help.
         """,
@@ -350,6 +439,30 @@ Use 'garmy-mcp <command> --help' for command-specific help.
         "-v",
         action="store_true",
         help="Enable verbose logging and configuration display",
+    )
+
+    server_parser.add_argument(
+        "--transport",
+        type=str,
+        choices=["stdio", "http", "sse"],
+        default="stdio",
+        help="Transport protocol: stdio (default, for Claude Desktop), "
+        "http (recommended for network), or sse (legacy network)",
+    )
+
+    server_parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Host address to bind for network transports (default: 127.0.0.1). "
+        "Use 0.0.0.0 to expose on all interfaces (WARNING: no authentication)",
+    )
+
+    server_parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port for network transports (default: 8000, range: 1024-65535 recommended)",
     )
 
     server_parser.set_defaults(func=cmd_server)

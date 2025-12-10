@@ -20,6 +20,11 @@ class MCPConfig:
     enable_query_logging: bool = False
     strict_validation: bool = True
 
+    # Network/transport settings
+    transport: str = "stdio"
+    host: str = "127.0.0.1"
+    port: int = 8000
+
     @classmethod
     def from_db_path(cls, db_path: Path, **kwargs) -> "MCPConfig":
         """Create config with database path and optional overrides."""
@@ -38,3 +43,17 @@ class MCPConfig:
 
         if self.max_rows <= 0:
             raise ValueError("max_rows must be positive")
+
+        # Validate transport settings
+        valid_transports = ("stdio", "http", "sse")
+        if self.transport not in valid_transports:
+            raise ValueError(
+                f"Invalid transport: {self.transport}. "
+                f"Must be one of: {', '.join(valid_transports)}"
+            )
+
+        if self.transport in ("http", "sse"):
+            if self.port < 1 or self.port > 65535:
+                raise ValueError(
+                    f"Port must be between 1 and 65535, got {self.port}"
+                )
