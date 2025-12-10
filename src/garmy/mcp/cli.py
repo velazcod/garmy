@@ -155,6 +155,13 @@ def cmd_server(args):
                 print("=" * 60, file=sys.stderr)
                 print("", file=sys.stderr)
 
+        # Resolve profile path for sync support
+        profile_path = None
+        if hasattr(args, "profile_path") and args.profile_path:
+            profile_path = Path(args.profile_path).expanduser()
+        elif os.environ.get("GARMY_PROFILE_PATH"):
+            profile_path = Path(os.environ["GARMY_PROFILE_PATH"]).expanduser()
+
         # Create config with CLI parameters
         config = MCPConfig(
             db_path=db_path,
@@ -165,6 +172,8 @@ def cmd_server(args):
             transport=args.transport,
             host=args.host,
             port=args.port,
+            enable_sync=args.enable_sync,
+            profile_path=profile_path,
         )
 
         if args.verbose:
@@ -195,10 +204,21 @@ def cmd_server(args):
                     print("WARNING: Server exposed on ALL network interfaces")
                 print("")
 
-            print(
-                "Available tools: explore_database_structure, get_table_details, "
-                "execute_sql_query, get_health_summary"
-            )
+            tools_list = [
+                "explore_database_structure",
+                "get_table_details",
+                "execute_sql_query",
+                "get_health_summary",
+            ]
+            if config.enable_sync:
+                tools_list.append("sync_health_data")
+                print(f"  - Sync enabled: yes")
+                if config.profile_path:
+                    print(f"  - Token directory: {config.profile_path}")
+            else:
+                print(f"  - Sync enabled: no (use --enable-sync to enable)")
+
+            print(f"Available tools: {', '.join(tools_list)}")
 
         # Create and run server with explicit config
         mcp_server = create_mcp_server(config)
@@ -333,7 +353,7 @@ def cmd_config(args):
     print('      "garmy-localdb": {')
     print('        "command": "garmy-mcp",')
     print(
-        '        "args": ["server", "--profile-path", "/path/to/profiles/user1"]'
+        '        "args": ["server", "--profile-path", "/path/to/profiles/user1", "--enable-sync"]'
     )
     print("      }")
     print("    }")
@@ -352,6 +372,16 @@ def cmd_config(args):
     print("  WARNING: Network transports expose health data without authentication.")
     print("  Use localhost binding (127.0.0.1) and SSH tunneling for remote access.")
 
+    print("\n🔄 Sync Settings:")
+    print("  --enable-sync: Enable the sync_health_data tool")
+    print("  --profile-path: Path to profile directory (contains tokens and database)")
+    print("")
+    print("  The sync tool allows AI assistants to fetch fresh data from Garmin Connect.")
+    print("  Requires valid saved authentication tokens - run 'garmy-sync sync' first.")
+    print("")
+    print("  Example with sync enabled:")
+    print("  garmy-mcp server --profile-path ~/profiles/user1 --enable-sync")
+
 
 def create_parser():
     """Create argument parser with subcommands."""
@@ -364,6 +394,9 @@ Examples:
   # Local stdio transport (default, for Claude Desktop)
   garmy-mcp server --database health.db
   garmy-mcp server --profile-path ~/profiles/user1
+
+  # With sync enabled (allows fetching fresh data from Garmin)
+  garmy-mcp server --profile-path ~/profiles/user1 --enable-sync
 
   # HTTP network transport
   garmy-mcp server --database health.db --transport http --port 8000
@@ -463,6 +496,13 @@ Use 'garmy-mcp <command> --help' for command-specific help.
         type=int,
         default=8000,
         help="Port for network transports (default: 8000, range: 1024-65535 recommended)",
+    )
+
+    server_parser.add_argument(
+        "--enable-sync",
+        action="store_true",
+        help="Enable the sync_health_data tool to fetch fresh data from Garmin Connect. "
+        "Requires valid saved authentication tokens (run 'garmy-sync sync' first to authenticate).",
     )
 
     server_parser.set_defaults(func=cmd_server)

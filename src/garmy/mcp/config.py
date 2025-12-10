@@ -1,6 +1,6 @@
 """Configuration management for Garmin LocalDB MCP Server."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -25,10 +25,21 @@ class MCPConfig:
     host: str = "127.0.0.1"
     port: int = 8000
 
+    # Sync settings
+    enable_sync: bool = False
+    profile_path: Optional[Path] = None
+
     @classmethod
     def from_db_path(cls, db_path: Path, **kwargs) -> "MCPConfig":
         """Create config with database path and optional overrides."""
         return cls(db_path=db_path, **kwargs)
+
+    @property
+    def token_dir(self) -> Optional[str]:
+        """Get token directory from profile path if set."""
+        if self.profile_path:
+            return str(self.profile_path)
+        return None
 
     def validate(self) -> None:
         """Validate configuration settings."""

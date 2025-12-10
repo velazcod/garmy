@@ -2,12 +2,14 @@
 
 Provides secure, read-only access to synchronized Garmin health data
 through the Model Context Protocol with optimized tools for LLM understanding.
+Optionally supports syncing data from Garmin Connect when enabled.
 """
 
 import logging
 import os
 import re
 import sqlite3
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -408,7 +410,167 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         """
         return _get_health_data_guide()
 
+    # Only add sync tool if sync is enabled
+    if config.enable_sync:
+        _register_sync_tool(mcp, config)
+
     return mcp
+
+
+def _register_sync_tool(mcp: FastMCP, config: MCPConfig) -> None:
+    """Register the sync tool with the MCP server.
+
+    Args:
+        mcp: The FastMCP server instance
+        config: MCP configuration with sync settings
+    """
+    from ..localdb.config import LocalDBConfig
+    from ..localdb.progress import ProgressReporter
+    from ..localdb.sync import SyncManager
+
+    # Create a simple progress reporter that collects messages
+    class MCPProgressReporter(ProgressReporter):
+        """Progress reporter that collects messages for MCP response."""
+
+        def __init__(self):
+            super().__init__(use_tqdm=False)
+            self.messages: List[str] = []
+
+        def info(self, message: str) -> None:
+            self.messages.append(f"[INFO] {message}")
+
+        def warning(self, message: str) -> None:
+            self.messages.append(f"[WARNING] {message}")
+
+        def error(self, message: str) -> None:
+            self.messages.append(f"[ERROR] {message}")
+
+        def task_complete(self, metric: str, sync_date: date) -> None:
+            pass  # Don't log individual task completions to reduce noise
+
+        def task_failed(self, metric: str, sync_date: date) -> None:
+            self.messages.append(f"[FAILED] {metric} for {sync_date}")
+
+        def task_skipped(self, metric: str, sync_date: date) -> None:
+            pass  # Don't log skips to reduce noise
+
+    @mcp.tool()
+    def sync_health_data(
+        last_days: int = 7,
+        metrics: Optional[str] = None,
+        user_id: int = 1,
+    ) -> Dict[str, Any]:
+        """WHEN TO USE: When you need to fetch fresh data from Garmin Connect.
+
+        This tool syncs health data from Garmin Connect API to the local database.
+        Use this when you need the latest data that may not be in the database yet.
+
+        IMPORTANT: Requires valid saved authentication tokens. Will fail if tokens
+        are expired or missing - user must run 'garmy-sync sync' manually first to
+        authenticate.
+
+        Args:
+            last_days: Number of days to sync, counting back from today (default: 7, max: 30)
+            metrics: Comma-separated list of metrics to sync (default: all).
+                     Available: DAILY_SUMMARY, SLEEP, HEART_RATE, STEPS, STRESS,
+                     BODY_BATTERY, HRV, CALORIES, RESPIRATION, TRAINING_READINESS,
+                     ACTIVITIES, BODY_COMPOSITION
+            user_id: User ID for database records (default: 1)
+
+        Returns:
+            Sync statistics including completed, skipped, and failed counts
+        """
+        # Validate parameters
+        if last_days < 1:
+            raise ValueError("last_days must be at least 1")
+        if last_days > 30:
+            raise ValueError(
+                "last_days cannot exceed 30 for MCP sync. "
+                "For larger syncs, use 'garmy-sync sync' CLI directly."
+            )
+        if user_id < 1:
+            raise ValueError("user_id must be positive")
+
+        # Parse metrics if provided
+        sync_metrics: Optional[List[MetricType]] = None
+        if metrics:
+            sync_metrics = []
+            for name in metrics.split(","):
+                name = name.strip().upper()
+                try:
+                    sync_metrics.append(MetricType[name])
+                except KeyError:
+                    available = ", ".join([m.name for m in MetricType])
+                    raise ValueError(
+                        f"Invalid metric: {name}. Available: {available}"
+                    )
+
+        # Calculate date range
+        end_date = date.today()
+        start_date = end_date - timedelta(days=last_days - 1)
+
+        # Create progress reporter
+        progress = MCPProgressReporter()
+
+        try:
+            # Initialize sync manager
+            localdb_config = LocalDBConfig()
+            manager = SyncManager(
+                db_path=config.db_path,
+                config=localdb_config,
+                progress_reporter=progress,
+                token_dir=config.token_dir,
+            )
+
+            # Initialize with saved tokens only (no interactive prompts)
+            try:
+                manager.initialize()
+            except RuntimeError as e:
+                return {
+                    "success": False,
+                    "error": "Authentication required",
+                    "message": (
+                        "No valid saved tokens found. Please run "
+                        "'garmy-sync sync' from the command line first to authenticate, "
+                        "then try again."
+                    ),
+                    "details": str(e),
+                }
+
+            # Execute sync
+            stats = manager.sync_range(
+                user_id=user_id,
+                start_date=start_date,
+                end_date=end_date,
+                metrics=sync_metrics,
+            )
+
+            return {
+                "success": True,
+                "date_range": {
+                    "start": start_date.isoformat(),
+                    "end": end_date.isoformat(),
+                },
+                "statistics": {
+                    "completed": stats["completed"],
+                    "skipped": stats["skipped"],
+                    "failed": stats["failed"],
+                    "total_tasks": stats["total_tasks"],
+                },
+                "metrics_synced": (
+                    [m.name for m in sync_metrics]
+                    if sync_metrics
+                    else [m.name for m in MetricType]
+                ),
+                "messages": progress.messages[-10:],  # Last 10 messages
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "messages": progress.messages[-10:],
+            }
 
 
 def _get_table_description(table_name: str) -> str:
