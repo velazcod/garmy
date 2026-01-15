@@ -29,6 +29,9 @@ class MCPConfig:
     enable_sync: bool = False
     profile_path: Optional[Path] = None
 
+    # Workout settings (requires authentication)
+    enable_workouts: bool = False
+
     @classmethod
     def from_db_path(cls, db_path: Path, **kwargs) -> "MCPConfig":
         """Create config with database path and optional overrides."""
@@ -65,6 +68,4 @@ class MCPConfig:
 
         if self.transport in ("http", "sse"):
             if self.port < 1 or self.port > 65535:
-                raise ValueError(
-                    f"Port must be between 1 and 65535, got {self.port}"
-                )
+                raise ValueError(f"Port must be between 1 and 65535, got {self.port}")

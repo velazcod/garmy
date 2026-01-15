@@ -414,6 +414,10 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
     if config.enable_sync:
         _register_sync_tool(mcp, config)
 
+    # Only add workout tools if workouts are enabled
+    if config.enable_workouts:
+        _register_workout_tools(mcp, config)
+
     return mcp
 
 
@@ -501,9 +505,7 @@ def _register_sync_tool(mcp: FastMCP, config: MCPConfig) -> None:
                     sync_metrics.append(MetricType[name])
                 except KeyError:
                     available = ", ".join([m.name for m in MetricType])
-                    raise ValueError(
-                        f"Invalid metric: {name}. Available: {available}"
-                    )
+                    raise ValueError(f"Invalid metric: {name}. Available: {available}")
 
         # Calculate date range
         end_date = date.today()
@@ -573,6 +575,533 @@ def _register_sync_tool(mcp: FastMCP, config: MCPConfig) -> None:
             }
 
 
+def _register_workout_tools(mcp: FastMCP, config: MCPConfig) -> None:
+    """Register workout management tools with the MCP server.
+
+    Args:
+        mcp: The FastMCP server instance
+        config: MCP configuration with workout settings
+    """
+    from ..auth.client import AuthClient
+    from ..core.client import APIClient
+    from ..workouts import SportType, WorkoutBuilder
+    from ..workouts.exercises import (
+        resolve_exercise,
+        search_exercises as search_exercises_func,
+    )
+
+    def _get_authenticated_client() -> APIClient:
+        """Get an authenticated API client using saved tokens."""
+        auth_client = AuthClient(token_dir=config.token_dir)
+        if not auth_client.is_authenticated:
+            raise ValueError(
+                "Authentication required. Please run 'garmy-sync sync' from the "
+                "command line first to authenticate, then try again."
+            )
+        return APIClient(auth_client=auth_client)
+
+    @mcp.tool()
+    def list_workouts(
+        limit: int = 20,
+        my_workouts_only: bool = True,
+    ) -> Dict[str, Any]:
+        """WHEN TO USE: When you need to see existing workouts in Garmin Connect.
+
+        Lists workouts from the user's Garmin Connect account. Use this to see
+        what workouts are available before modifying or scheduling them.
+
+        IMPORTANT: Requires valid saved authentication tokens.
+
+        Args:
+            limit: Maximum number of workouts to return (default: 20, max: 100)
+            my_workouts_only: If True, only return user's own workouts (default: True)
+
+        Returns:
+            List of workouts with their IDs, names, sport types, and step counts
+        """
+        if limit < 1 or limit > 100:
+            raise ValueError("limit must be between 1 and 100")
+
+        try:
+            api = _get_authenticated_client()
+            workouts = api.workouts.list_workouts(
+                limit=limit, my_workouts_only=my_workouts_only
+            )
+
+            return {
+                "success": True,
+                "count": len(workouts),
+                "workouts": [
+                    {
+                        "workout_id": w.workout_id,
+                        "name": w.name,
+                        "sport_type": w.sport_type.key,
+                        "description": w.description,
+                        "step_count": len(w.steps),
+                    }
+                    for w in workouts
+                ],
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @mcp.tool()
+    def get_workout(workout_id: int) -> Dict[str, Any]:
+        """WHEN TO USE: When you need details about a specific workout.
+
+        Gets the full details of a workout including all steps, targets, and durations.
+
+        IMPORTANT: Requires valid saved authentication tokens.
+
+        Args:
+            workout_id: The Garmin workout ID to retrieve
+
+        Returns:
+            Full workout details including steps and structure
+        """
+        if workout_id < 1:
+            raise ValueError("workout_id must be positive")
+
+        try:
+            api = _get_authenticated_client()
+            workout = api.workouts.get_workout(workout_id)
+
+            if workout is None:
+                return {"success": False, "error": f"Workout {workout_id} not found"}
+
+            # Format steps for readability
+            steps_info = []
+            for i, step in enumerate(workout.steps):
+                from ..workouts.models import RepeatGroup
+
+                if isinstance(step, RepeatGroup):
+                    steps_info.append(
+                        {
+                            "index": i + 1,
+                            "type": "repeat",
+                            "iterations": step.iterations,
+                            "steps": [
+                                {
+                                    "type": s.step_type.value,
+                                    "duration_seconds": s.end_condition.value,
+                                    "end_condition": s.end_condition.condition_type.value,
+                                    "target_type": s.target.target_type.value,
+                                    "exercise_name": s.exercise_name,
+                                    "exercise_category": s.exercise_category,
+                                    "weight_value": s.weight_value,
+                                    "weight_unit": s.weight_unit,
+                                    "description": s.description,
+                                }
+                                for s in step.steps
+                            ],
+                        }
+                    )
+                else:
+                    steps_info.append(
+                        {
+                            "index": i + 1,
+                            "type": step.step_type.value,
+                            "duration_seconds": step.end_condition.value,
+                            "end_condition": step.end_condition.condition_type.value,
+                            "target_type": step.target.target_type.value,
+                            "target_low": step.target.value_low,
+                            "target_high": step.target.value_high,
+                            "exercise_name": step.exercise_name,
+                            "exercise_category": step.exercise_category,
+                            "weight_value": step.weight_value,
+                            "weight_unit": step.weight_unit,
+                            "description": step.description,
+                        }
+                    )
+
+            return {
+                "success": True,
+                "workout": {
+                    "workout_id": workout.workout_id,
+                    "name": workout.name,
+                    "sport_type": workout.sport_type.key,
+                    "description": workout.description,
+                    "steps": steps_info,
+                },
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @mcp.tool()
+    def create_workout(
+        name: str,
+        sport_type: str = "cycling",
+        description: Optional[str] = None,
+        steps_json: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """WHEN TO USE: When you need to create a new workout in Garmin Connect.
+
+        Creates a structured workout that can be synced to Garmin devices.
+
+        IMPORTANT: Requires valid saved authentication tokens.
+
+        Args:
+            name: Name for the workout
+            sport_type: Sport type (cycling, running, swimming, strength_training, etc.)
+            description: Optional description
+            steps_json: JSON string defining workout steps. Format:
+                [{"type": "warmup|interval|recovery|cooldown|rest",
+                  "seconds": 60, "minutes": 10, "duration_seconds": 60,
+                  "target_power": [88, 93], "description": "..."}]
+                For repeats: {"type": "repeat", "iterations": 3, "steps": [...]}
+                Duration can be specified as "minutes", "seconds", or "duration_seconds"
+
+        Example steps_json:
+            '[{"type": "warmup", "seconds": 300},
+              {"type": "repeat", "iterations": 3, "steps": [
+                {"type": "interval", "duration_seconds": 30, "target_power": [90, 95]},
+                {"type": "rest", "duration_seconds": 60}
+              ]},
+              {"type": "cooldown", "minutes": 5}]'
+
+        Returns:
+            Created workout details including the new workout_id
+        """
+        import json
+
+        # Validate sport type
+        try:
+            sport = SportType.from_key(sport_type.lower())
+        except (ValueError, AttributeError) as e:
+            available = [s.key for s in SportType]
+            raise ValueError(
+                f"Invalid sport_type: {sport_type}. Available: {', '.join(available)}"
+            ) from e
+
+        try:
+            api = _get_authenticated_client()
+            builder = WorkoutBuilder(name, sport)
+
+            if description:
+                builder.with_description(description)
+
+            # Parse and add steps if provided
+            if steps_json:
+                steps = json.loads(steps_json)
+                _add_steps_from_json(builder, steps)
+
+            workout = builder.build()
+            result = api.workouts.create_workout(workout)
+
+            return {
+                "success": True,
+                "message": f"Workout '{name}' created successfully",
+                "workout": {
+                    "workout_id": result.workout_id,
+                    "name": result.name,
+                    # Use the sport type we requested, not from response
+                    # (Garmin returns sportTypeKey=null when we only send sportTypeKey)
+                    "sport_type": sport.key,
+                },
+            }
+        except json.JSONDecodeError as e:
+            return {"success": False, "error": f"Invalid steps_json format: {e}"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @mcp.tool()
+    def schedule_workout(
+        workout_id: int,
+        date: str,
+    ) -> Dict[str, Any]:
+        """WHEN TO USE: When you need to schedule a workout for a specific date.
+
+        Schedules an existing workout to appear on the user's Garmin calendar
+        for the specified date. The workout will sync to connected devices.
+
+        IMPORTANT: Requires valid saved authentication tokens.
+
+        Args:
+            workout_id: The Garmin workout ID to schedule
+            date: Date to schedule in YYYY-MM-DD format (e.g., "2024-01-15")
+
+        Returns:
+            Success status and confirmation message
+        """
+        import re
+
+        if workout_id < 1:
+            raise ValueError("workout_id must be positive")
+
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+            raise ValueError("date must be in YYYY-MM-DD format")
+
+        try:
+            api = _get_authenticated_client()
+            api.workouts.schedule_workout(workout_id, date)
+
+            return {
+                "success": True,
+                "message": f"Workout {workout_id} scheduled for {date}",
+                "workout_id": workout_id,
+                "scheduled_date": date,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @mcp.tool()
+    def delete_workout(workout_id: int) -> Dict[str, Any]:
+        """WHEN TO USE: When you need to delete a workout from Garmin Connect.
+
+        Permanently deletes a workout. This cannot be undone.
+
+        IMPORTANT: Requires valid saved authentication tokens.
+
+        Args:
+            workout_id: The Garmin workout ID to delete
+
+        Returns:
+            Success status and confirmation message
+        """
+        if workout_id < 1:
+            raise ValueError("workout_id must be positive")
+
+        try:
+            api = _get_authenticated_client()
+            api.workouts.delete_workout(workout_id)
+
+            return {
+                "success": True,
+                "message": f"Workout {workout_id} deleted successfully",
+                "workout_id": workout_id,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @mcp.tool()
+    def search_exercises(
+        query: str,
+        limit: int = 10,
+        category: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """WHEN TO USE: When you need to find valid Garmin exercise names for strength workouts.
+
+        Searches the exercise database to find matching exercises. Use this to discover
+        the correct exercise name before creating a strength training workout.
+
+        This tool does NOT require authentication - it's a local lookup.
+
+        Args:
+            query: Search term (e.g., "bench press", "curl", "squat")
+            limit: Maximum results to return (default: 10, max: 50)
+            category: Optional category filter (e.g., "BENCH_PRESS", "CURL", "SQUAT")
+
+        Returns:
+            List of matching exercises with their Garmin names, categories, and match scores
+        """
+        if limit < 1 or limit > 50:
+            raise ValueError("limit must be between 1 and 50")
+
+        try:
+            results = search_exercises_func(query, limit=limit)
+
+            # Filter by category if provided
+            if category:
+                category_upper = category.upper()
+                results = [r for r in results if r.category == category_upper]
+
+            return {
+                "success": True,
+                "query": query,
+                "count": len(results),
+                "exercises": [
+                    {
+                        "name": r.name,
+                        "category": r.category,
+                        "score": round(r.score, 3),
+                    }
+                    for r in results
+                ],
+                "usage_tip": "Use the 'name' field as exercise_name in create_workout steps_json",
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _is_garmin_format(name: str) -> bool:
+        """Check if name is already in SCREAMING_SNAKE_CASE Garmin format."""
+        return name == name.upper() and "_" in name
+
+    def _add_steps_from_json(builder: WorkoutBuilder, steps: list) -> None:
+        """Add steps to builder from JSON structure."""
+        for step in steps:
+            step_type = step.get("type", "interval").lower()
+            minutes = step.get("minutes")
+            # Accept both "seconds" and "duration_seconds" for consistency with get_workout output
+            seconds = step.get("seconds") or step.get("duration_seconds")
+            distance_km = step.get("distance_km")
+            target_power = step.get("target_power")
+            target_hr = step.get("target_hr")
+            target_cadence = step.get("target_cadence")
+            description = step.get("description")
+            lap_button = step.get("lap_button", False)
+
+            # Extract exercise fields for strength training
+            reps = step.get("reps")
+            exercise_name = step.get("exercise_name")
+            exercise_category = step.get("exercise_category")
+            weight_value = step.get("weight_value")
+            weight_unit = step.get("weight_unit")
+
+            # Auto-resolve exercise name if not already in Garmin format
+            if exercise_name and not _is_garmin_format(exercise_name):
+                try:
+                    resolved_name, resolved_category = resolve_exercise(exercise_name)
+                    exercise_name = resolved_name
+                    # Only override category if not explicitly provided
+                    if not exercise_category:
+                        exercise_category = resolved_category
+                except ValueError:
+                    # If resolution fails, pass through the original name
+                    # Let Garmin API handle the error
+                    pass
+
+            # Convert target lists to tuples
+            if target_power and isinstance(target_power, list):
+                target_power = tuple(target_power)
+            if target_hr and isinstance(target_hr, list):
+                target_hr = tuple(target_hr)
+            if target_cadence and isinstance(target_cadence, list):
+                target_cadence = tuple(target_cadence)
+
+            if step_type == "repeat":
+                iterations = step.get("iterations", 1)
+                repeat_steps = step.get("steps", [])
+                repeat_builder = builder.repeat(iterations)
+
+                for rs in repeat_steps:
+                    rs_type = rs.get("type", "interval").lower()
+                    rs_minutes = rs.get("minutes")
+                    # Accept both "seconds" and "duration_seconds"
+                    rs_seconds = rs.get("seconds") or rs.get("duration_seconds")
+                    rs_target_power = rs.get("target_power")
+                    rs_target_hr = rs.get("target_hr")
+                    rs_desc = rs.get("description")
+
+                    # Extract exercise fields for nested steps
+                    rs_reps = rs.get("reps")
+                    rs_exercise_name = rs.get("exercise_name")
+                    rs_exercise_category = rs.get("exercise_category")
+                    rs_weight_value = rs.get("weight_value")
+                    rs_weight_unit = rs.get("weight_unit")
+
+                    # Auto-resolve exercise name if not already in Garmin format
+                    if rs_exercise_name and not _is_garmin_format(rs_exercise_name):
+                        try:
+                            resolved_name, resolved_category = resolve_exercise(
+                                rs_exercise_name
+                            )
+                            rs_exercise_name = resolved_name
+                            # Only override category if not explicitly provided
+                            if not rs_exercise_category:
+                                rs_exercise_category = resolved_category
+                        except ValueError:
+                            # If resolution fails, pass through the original name
+                            # Let Garmin API handle the error
+                            pass
+
+                    if rs_target_power and isinstance(rs_target_power, list):
+                        rs_target_power = tuple(rs_target_power)
+                    if rs_target_hr and isinstance(rs_target_hr, list):
+                        rs_target_hr = tuple(rs_target_hr)
+
+                    if rs_type == "interval":
+                        repeat_builder.interval(
+                            minutes=rs_minutes,
+                            seconds=rs_seconds,
+                            target_power=rs_target_power,
+                            target_hr=rs_target_hr,
+                            description=rs_desc,
+                            reps=rs_reps,
+                            exercise_name=rs_exercise_name,
+                            exercise_category=rs_exercise_category,
+                            weight_value=rs_weight_value,
+                            weight_unit=rs_weight_unit,
+                        )
+                    elif rs_type == "recovery":
+                        repeat_builder.recovery(
+                            minutes=rs_minutes,
+                            seconds=rs_seconds,
+                            target_power=rs_target_power,
+                            target_hr=rs_target_hr,
+                            description=rs_desc,
+                            reps=rs_reps,
+                            exercise_name=rs_exercise_name,
+                            exercise_category=rs_exercise_category,
+                            weight_value=rs_weight_value,
+                            weight_unit=rs_weight_unit,
+                        )
+                    elif rs_type == "rest":
+                        repeat_builder.rest(
+                            minutes=rs_minutes, seconds=rs_seconds, description=rs_desc
+                        )
+
+                repeat_builder.end_repeat()
+
+            elif step_type == "warmup":
+                builder.warmup(
+                    minutes=minutes,
+                    seconds=seconds,
+                    distance_km=distance_km,
+                    target_power=target_power,
+                    target_hr=target_hr,
+                    lap_button=lap_button,
+                    description=description,
+                )
+            elif step_type == "cooldown":
+                builder.cooldown(
+                    minutes=minutes,
+                    seconds=seconds,
+                    distance_km=distance_km,
+                    target_power=target_power,
+                    target_hr=target_hr,
+                    lap_button=lap_button,
+                    description=description,
+                )
+            elif step_type == "interval":
+                builder.interval(
+                    minutes=minutes,
+                    seconds=seconds,
+                    distance_km=distance_km,
+                    target_power=target_power,
+                    target_hr=target_hr,
+                    target_cadence=target_cadence,
+                    lap_button=lap_button,
+                    description=description,
+                    reps=reps,
+                    exercise_name=exercise_name,
+                    exercise_category=exercise_category,
+                    weight_value=weight_value,
+                    weight_unit=weight_unit,
+                )
+            elif step_type == "recovery":
+                builder.recovery(
+                    minutes=minutes,
+                    seconds=seconds,
+                    distance_km=distance_km,
+                    target_power=target_power,
+                    target_hr=target_hr,
+                    lap_button=lap_button,
+                    description=description,
+                    reps=reps,
+                    exercise_name=exercise_name,
+                    exercise_category=exercise_category,
+                    weight_value=weight_value,
+                    weight_unit=weight_unit,
+                )
+            elif step_type == "rest":
+                builder.rest(
+                    minutes=minutes,
+                    seconds=seconds,
+                    lap_button=lap_button,
+                    description=description,
+                )
+
+
 def _get_table_description(table_name: str) -> str:
     """Get human-readable description for table."""
     descriptions = {
@@ -599,7 +1128,7 @@ def _get_health_data_guide() -> str:
 ### daily_health_metrics
 **WHAT**: Daily summaries of all health metrics
 **CONTAINS**: steps, sleep hours, heart rate averages, stress levels, body battery
-**COMMON QUERIES**: 
+**COMMON QUERIES**:
 - Recent trends: `SELECT metric_date, total_steps, sleep_duration_hours FROM daily_health_metrics WHERE user_id = 1 ORDER BY metric_date DESC LIMIT 30`
 - Sleep analysis: `SELECT metric_date, sleep_duration_hours, deep_sleep_hours FROM daily_health_metrics WHERE sleep_duration_hours IS NOT NULL`
 

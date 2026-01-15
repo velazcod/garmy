@@ -151,7 +151,9 @@ def cmd_server(args):
                 print("Recommendations:", file=sys.stderr)
                 print("  - Use firewall rules to restrict access", file=sys.stderr)
                 print("  - Use SSH tunneling for remote access", file=sys.stderr)
-                print("  - Consider using 127.0.0.1 for localhost-only", file=sys.stderr)
+                print(
+                    "  - Consider using 127.0.0.1 for localhost-only", file=sys.stderr
+                )
                 print("=" * 60, file=sys.stderr)
                 print("", file=sys.stderr)
 
@@ -174,6 +176,7 @@ def cmd_server(args):
             port=args.port,
             enable_sync=args.enable_sync,
             profile_path=profile_path,
+            enable_workouts=args.enable_workouts,
         )
 
         if args.verbose:
@@ -217,6 +220,20 @@ def cmd_server(args):
                     print(f"  - Token directory: {config.profile_path}")
             else:
                 print(f"  - Sync enabled: no (use --enable-sync to enable)")
+
+            if config.enable_workouts:
+                tools_list.extend(
+                    [
+                        "list_workouts",
+                        "get_workout",
+                        "create_workout",
+                        "schedule_workout",
+                        "delete_workout",
+                    ]
+                )
+                print("  - Workouts enabled: yes")
+            else:
+                print("  - Workouts enabled: no (use --enable-workouts to enable)")
 
             print(f"Available tools: {', '.join(tools_list)}")
 
@@ -297,10 +314,19 @@ def cmd_info(args):
             print(f"\\nWarning: Could not analyze database structure: {e}")
 
         print("\\nMCP Server Tools:")
+        print("  Core tools (always available):")
         print("  - explore_database_structure() - Discover available data")
         print("  - get_table_details(name) - Get table schema and samples")
         print("  - execute_sql_query(sql, params) - Run SQL queries safely")
         print("  - get_health_summary(user_id, days) - Quick health overview")
+        print("  Sync tool (requires --enable-sync):")
+        print("  - sync_health_data(last_days, metrics) - Fetch fresh data from Garmin")
+        print("  Workout tools (requires --enable-workouts):")
+        print("  - list_workouts(limit) - List workouts from Garmin Connect")
+        print("  - get_workout(workout_id) - Get workout details")
+        print("  - create_workout(name, sport_type, steps_json) - Create a workout")
+        print("  - schedule_workout(workout_id, date) - Schedule workout")
+        print("  - delete_workout(workout_id) - Delete a workout")
 
         print("\\nTo start MCP server:")
         print(f"  garmy-mcp server --database {db_path}")
@@ -376,11 +402,27 @@ def cmd_config(args):
     print("  --enable-sync: Enable the sync_health_data tool")
     print("  --profile-path: Path to profile directory (contains tokens and database)")
     print("")
-    print("  The sync tool allows AI assistants to fetch fresh data from Garmin Connect.")
+    print(
+        "  The sync tool allows AI assistants to fetch fresh data from Garmin Connect."
+    )
     print("  Requires valid saved authentication tokens - run 'garmy-sync sync' first.")
     print("")
     print("  Example with sync enabled:")
     print("  garmy-mcp server --profile-path ~/profiles/user1 --enable-sync")
+
+    print("\n🏋️ Workout Settings:")
+    print("  --enable-workouts: Enable workout management tools")
+    print("")
+    print("  Workout tools allow AI assistants to create, list, schedule, and delete")
+    print("  workouts in Garmin Connect. Requires valid saved authentication tokens.")
+    print("")
+    print("  Example with workouts enabled:")
+    print("  garmy-mcp server --profile-path ~/profiles/user1 --enable-workouts")
+    print("")
+    print("  Example with both sync and workouts:")
+    print(
+        "  garmy-mcp server --profile-path ~/profiles/user1 --enable-sync --enable-workouts"
+    )
 
 
 def create_parser():
@@ -502,6 +544,13 @@ Use 'garmy-mcp <command> --help' for command-specific help.
         "--enable-sync",
         action="store_true",
         help="Enable the sync_health_data tool to fetch fresh data from Garmin Connect. "
+        "Requires valid saved authentication tokens (run 'garmy-sync sync' first to authenticate).",
+    )
+
+    server_parser.add_argument(
+        "--enable-workouts",
+        action="store_true",
+        help="Enable workout management tools (list, create, schedule, delete workouts). "
         "Requires valid saved authentication tokens (run 'garmy-sync sync' first to authenticate).",
     )
 
