@@ -142,26 +142,24 @@ class WorkoutSerializer:
             result["exerciseName"] = step.exercise_name
 
         if step.weight_value is not None:
-            # Garmin stores weight in grams internally and uses kilogram as the standard unit
-            # We must convert to kilograms and send with kilogram unit
+            # Send weight in its original unit - the Garmin mobile app has a bug
+            # where it doesn't convert kg to the user's display preference,
+            # so we send in the user's specified unit (default: pound)
             weight_unit = step.weight_unit or "pound"
-            weight_in_kg: float
+            result["weightValue"] = step.weight_value
             if weight_unit == "kilogram":
-                weight_in_kg = step.weight_value
-            elif weight_unit == "pound":
-                # Convert pounds to kilograms
-                weight_in_kg = step.weight_value / 2.20462
+                result["weightUnit"] = {
+                    "unitId": 8,
+                    "unitKey": "kilogram",
+                    "factor": 1000.0,
+                }
             else:
-                # Assume kilograms
-                weight_in_kg = step.weight_value
-
-            result["weightValue"] = round(weight_in_kg, 2)
-            # Always send as kilogram - Garmin will convert to user's display preference
-            result["weightUnit"] = {
-                "unitId": 8,
-                "unitKey": "kilogram",
-                "factor": 1000.0,
-            }
+                # Default to pound
+                result["weightUnit"] = {
+                    "unitId": 9,
+                    "unitKey": "pound",
+                    "factor": 453.59237,
+                }
 
         return result
 
