@@ -131,7 +131,7 @@ class EndConditionType(Enum):
             EndConditionType.POWER_LESS_THAN: 11,
             EndConditionType.POWER_GREATER_THAN: 12,
             EndConditionType.ITERATIONS: 7,
-            EndConditionType.REPS: 8,
+            EndConditionType.REPS: 10,  # Garmin uses ID 10 for reps
         }
         return type_ids.get(self, 1)
 
@@ -146,7 +146,7 @@ class EndConditionType(Enum):
             5: cls.HEART_RATE_LESS_THAN,
             6: cls.HEART_RATE_GREATER_THAN,
             7: cls.ITERATIONS,
-            8: cls.REPS,
+            10: cls.REPS,  # Garmin uses ID 10 for reps
             11: cls.POWER_LESS_THAN,
             12: cls.POWER_GREATER_THAN,
         }

@@ -340,15 +340,23 @@ class WorkoutSerializer:
         exercise_category = data.get("category")
 
         # Parse weight info
-        # Garmin stores weight in kilograms, convert to pounds for display
+        # Garmin returns weight with unit info - respect the unit from API
         weight_value_raw = data.get("weightValue")
+        weight_unit_data = data.get("weightUnit") or {}
         weight_value: Optional[float] = None
         weight_unit: Optional[str] = None
 
         if weight_value_raw is not None and weight_value_raw > 0:
-            # Convert from kilograms to pounds
-            weight_value = round(weight_value_raw * 2.20462, 1)
-            weight_unit = "pound"
+            # Check what unit Garmin returned
+            api_unit = weight_unit_data.get("unitKey", "kilogram")
+            if api_unit == "pound":
+                # Already in pounds, use as-is
+                weight_value = round(weight_value_raw, 1)
+                weight_unit = "pound"
+            else:
+                # Assume kilograms, convert to pounds for consistency
+                weight_value = round(weight_value_raw * 2.20462, 1)
+                weight_unit = "pound"
         elif weight_value_raw is not None and weight_value_raw < 0:
             # Clean up negative placeholder values from API
             weight_value = None

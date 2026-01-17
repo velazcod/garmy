@@ -11,7 +11,7 @@ import re
 import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 try:
     from fastmcp import FastMCP
@@ -675,44 +675,65 @@ def _register_workout_tools(mcp: FastMCP, config: MCPConfig) -> None:
                 from ..workouts.models import RepeatGroup
 
                 if isinstance(step, RepeatGroup):
+                    from ..workouts.constants import EndConditionType
+
+                    def format_nested_step(s):
+                        """Format a nested step with appropriate field names."""
+                        result = {
+                            "type": s.step_type.value,
+                            "end_condition": s.end_condition.condition_type.value,
+                            "target_type": s.target.target_type.value,
+                            "exercise_name": s.exercise_name,
+                            "exercise_category": s.exercise_category,
+                            "weight_value": s.weight_value,
+                            "weight_unit": s.weight_unit,
+                            "description": s.description,
+                        }
+                        # Use appropriate field name based on end condition type
+                        if s.end_condition.condition_type == EndConditionType.REPS:
+                            result["reps"] = (
+                                int(s.end_condition.value)
+                                if s.end_condition.value
+                                else None
+                            )
+                        else:
+                            result["duration_seconds"] = s.end_condition.value
+                        return result
+
                     steps_info.append(
                         {
                             "index": i + 1,
                             "type": "repeat",
                             "iterations": step.iterations,
-                            "steps": [
-                                {
-                                    "type": s.step_type.value,
-                                    "duration_seconds": s.end_condition.value,
-                                    "end_condition": s.end_condition.condition_type.value,
-                                    "target_type": s.target.target_type.value,
-                                    "exercise_name": s.exercise_name,
-                                    "exercise_category": s.exercise_category,
-                                    "weight_value": s.weight_value,
-                                    "weight_unit": s.weight_unit,
-                                    "description": s.description,
-                                }
-                                for s in step.steps
-                            ],
+                            "steps": [format_nested_step(s) for s in step.steps],
                         }
                     )
                 else:
-                    steps_info.append(
-                        {
-                            "index": i + 1,
-                            "type": step.step_type.value,
-                            "duration_seconds": step.end_condition.value,
-                            "end_condition": step.end_condition.condition_type.value,
-                            "target_type": step.target.target_type.value,
-                            "target_low": step.target.value_low,
-                            "target_high": step.target.value_high,
-                            "exercise_name": step.exercise_name,
-                            "exercise_category": step.exercise_category,
-                            "weight_value": step.weight_value,
-                            "weight_unit": step.weight_unit,
-                            "description": step.description,
-                        }
-                    )
+                    from ..workouts.constants import EndConditionType
+
+                    step_info = {
+                        "index": i + 1,
+                        "type": step.step_type.value,
+                        "end_condition": step.end_condition.condition_type.value,
+                        "target_type": step.target.target_type.value,
+                        "target_low": step.target.value_low,
+                        "target_high": step.target.value_high,
+                        "exercise_name": step.exercise_name,
+                        "exercise_category": step.exercise_category,
+                        "weight_value": step.weight_value,
+                        "weight_unit": step.weight_unit,
+                        "description": step.description,
+                    }
+                    # Use appropriate field name based on end condition type
+                    if step.end_condition.condition_type == EndConditionType.REPS:
+                        step_info["reps"] = (
+                            int(step.end_condition.value)
+                            if step.end_condition.value
+                            else None
+                        )
+                    else:
+                        step_info["duration_seconds"] = step.end_condition.value
+                    steps_info.append(step_info)
 
             return {
                 "success": True,
@@ -732,7 +753,7 @@ def _register_workout_tools(mcp: FastMCP, config: MCPConfig) -> None:
         name: str,
         sport_type: str = "cycling",
         description: Optional[str] = None,
-        steps_json: Optional[str] = None,
+        steps_json: Union[str, List[Dict[str, Any]], None] = None,
     ) -> Dict[str, Any]:
         """WHEN TO USE: When you need to create a new workout in Garmin Connect.
 
@@ -744,20 +765,43 @@ def _register_workout_tools(mcp: FastMCP, config: MCPConfig) -> None:
             name: Name for the workout
             sport_type: Sport type (cycling, running, swimming, strength_training, etc.)
             description: Optional description
-            steps_json: JSON string defining workout steps. Format:
-                [{"type": "warmup|interval|recovery|cooldown|rest",
-                  "seconds": 60, "minutes": 10, "duration_seconds": 60,
-                  "target_power": [88, 93], "description": "..."}]
-                For repeats: {"type": "repeat", "iterations": 3, "steps": [...]}
-                Duration can be specified as "minutes", "seconds", or "duration_seconds"
+            steps_json: JSON string defining workout steps.
 
-        Example steps_json:
+        Step format - each step can have these fields:
+            - type: "warmup", "interval", "recovery", "cooldown", "rest", or "repeat"
+            - Duration (pick ONE): "seconds", "minutes", "duration_seconds", OR "reps"
+            - reps: Number of repetitions (REQUIRED for strength exercises to show "Target: X Reps")
+            - exercise_name: Exercise name (auto-resolved, e.g., "bench press" -> "BARBELL_BENCH_PRESS")
+            - exercise_category: Optional category override
+            - weight_value: Weight amount for strength exercises
+            - weight_unit: "pound" or "kilogram" (default: pound)
+            - target_power: [low, high] percentage of FTP for cycling
+            - target_hr: [low, high] percentage of max HR
+            - target_cadence: [low, high] RPM
+            - description: Step description text
+            - lap_button: true to end step on lap button press (default if no duration/reps specified)
+
+        For repeats: {"type": "repeat", "iterations": 3, "steps": [...]}
+
+        IMPORTANT FOR STRENGTH TRAINING:
+            - You MUST include "reps" to set the rep count (e.g., "reps": 10)
+            - Without "reps", the step defaults to "lap button" end condition
+            - The "reps" value is what shows as "Target: X Reps" in Garmin Connect UI
+
+        Example cycling workout:
             '[{"type": "warmup", "seconds": 300},
               {"type": "repeat", "iterations": 3, "steps": [
                 {"type": "interval", "duration_seconds": 30, "target_power": [90, 95]},
                 {"type": "rest", "duration_seconds": 60}
               ]},
               {"type": "cooldown", "minutes": 5}]'
+
+        Example strength workout (note: reps is REQUIRED for rep-based exercises):
+            '[{"type": "repeat", "iterations": 3, "steps": [
+                {"type": "interval", "reps": 10,
+                 "exercise_name": "barbell bench press", "weight_value": 185, "weight_unit": "pound"},
+                {"type": "rest", "seconds": 60}
+              ]}]'
 
         Returns:
             Created workout details including the new workout_id
@@ -782,7 +826,23 @@ def _register_workout_tools(mcp: FastMCP, config: MCPConfig) -> None:
 
             # Parse and add steps if provided
             if steps_json:
-                steps = json.loads(steps_json)
+                if isinstance(steps_json, str):
+                    try:
+                        steps = json.loads(steps_json)
+                    except json.JSONDecodeError as e:
+                        return {
+                            "success": False,
+                            "error": f"Invalid steps_json format: {e}",
+                        }
+                elif isinstance(steps_json, list):
+                    # Handle case where environment already parsed the JSON
+                    steps = steps_json
+                else:
+                    return {
+                        "success": False,
+                        "error": f"steps_json must be a JSON string or list, got {type(steps_json).__name__}",
+                    }
+
                 _add_steps_from_json(builder, steps)
 
             workout = builder.build()
