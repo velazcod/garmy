@@ -94,6 +94,7 @@ class SyncManager:
         start_date: date,
         end_date: date,
         metrics: Optional[List[MetricType]] = None,
+        resync_days: int = 0,
     ) -> Dict[str, int]:
         """Sync metrics for date range.
 
@@ -102,6 +103,9 @@ class SyncManager:
             start_date: Start of sync range
             end_date: End of sync range
             metrics: List of metrics to sync (default: all)
+            resync_days: Number of recent days to force re-sync even if
+                already completed. Useful for ensuring today's partial data
+                gets updated with final totals on subsequent runs.
 
         Returns:
             Dict with sync statistics
@@ -115,6 +119,19 @@ class SyncManager:
             raise ValueError(
                 f"Date range too large: {date_count} days. Maximum allowed: {self.config.sync.max_sync_days} days"
             )
+
+        # Reset completed status for recent days so they get re-fetched
+        if resync_days > 0:
+            resync_cutoff = date.today() - timedelta(days=resync_days - 1)
+            resync_start = max(start_date, resync_cutoff)
+            reset_count = self._reset_completed_statuses(
+                user_id, resync_start, end_date
+            )
+            if reset_count > 0:
+                self.progress.info(
+                    f"Reset {reset_count} completed records for re-sync "
+                    f"({resync_start} to {end_date})"
+                )
 
         if metrics is None:
             metrics = list(MetricType)
@@ -768,6 +785,15 @@ class SyncManager:
         ]:
             # Store all extracted data for these metrics
             self.db.store_health_metric(user_id, sync_date, **data)
+
+    def _reset_completed_statuses(
+        self, user_id: int, start_date: date, end_date: date
+    ) -> int:
+        """Reset completed sync statuses to pending for a date range.
+
+        Returns the number of records reset.
+        """
+        return self.db.reset_completed_statuses(user_id, start_date, end_date)
 
     def _is_metric_completed(
         self, user_id: int, metric_type: MetricType, sync_date: date

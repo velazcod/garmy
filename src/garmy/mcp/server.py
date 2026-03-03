@@ -463,6 +463,7 @@ def _register_sync_tool(mcp: FastMCP, config: MCPConfig) -> None:
         last_days: int = 7,
         metrics: Optional[str] = None,
         user_id: int = 1,
+        resync_days: int = 0,
     ) -> Dict[str, Any]:
         """WHEN TO USE: When you need to fetch fresh data from Garmin Connect.
 
@@ -480,6 +481,8 @@ def _register_sync_tool(mcp: FastMCP, config: MCPConfig) -> None:
                      BODY_BATTERY, HRV, CALORIES, RESPIRATION, TRAINING_READINESS,
                      ACTIVITIES, BODY_COMPOSITION
             user_id: User ID for database records (default: 1)
+            resync_days: Force re-sync of the last N days even if already completed.
+                         Useful for updating partial data from earlier syncs (default: 0, max: 7)
 
         Returns:
             Sync statistics including completed, skipped, and failed counts
@@ -494,6 +497,13 @@ def _register_sync_tool(mcp: FastMCP, config: MCPConfig) -> None:
             )
         if user_id < 1:
             raise ValueError("user_id must be positive")
+        if resync_days < 0:
+            raise ValueError("resync_days must be non-negative")
+        if resync_days > 7:
+            raise ValueError(
+                "resync_days cannot exceed 7 for MCP sync. "
+                "For larger re-syncs, use 'garmy-sync sync' CLI directly."
+            )
 
         # Parse metrics if provided
         sync_metrics: Optional[List[MetricType]] = None
@@ -545,6 +555,7 @@ def _register_sync_tool(mcp: FastMCP, config: MCPConfig) -> None:
                 start_date=start_date,
                 end_date=end_date,
                 metrics=sync_metrics,
+                resync_days=resync_days,
             )
 
             return {

@@ -296,6 +296,29 @@ class HealthDB:
             )
             return sync_status.status if sync_status else None
 
+    def reset_completed_statuses(
+        self, user_id: int, start_date: date, end_date: date
+    ) -> int:
+        """Reset completed sync statuses to pending for a date range.
+
+        Returns the number of records reset.
+        """
+        with self.get_session() as session:
+            count = (
+                session.query(SyncStatus)
+                .filter(
+                    and_(
+                        SyncStatus.user_id == user_id,
+                        SyncStatus.sync_date >= start_date,
+                        SyncStatus.sync_date <= end_date,
+                        SyncStatus.status == "completed",
+                    )
+                )
+                .update({"status": "pending"})
+            )
+            session.commit()
+            return count
+
     def get_pending_metrics(self, user_id: int, sync_date: date) -> List[str]:
         """Get list of pending metrics for date."""
         with self.get_session() as session:

@@ -158,6 +158,7 @@ def cmd_sync(args) -> int:
             start_date=start_date,
             end_date=end_date,
             metrics=metrics,
+            resync_days=args.resync_days,
         )
 
         # Print results
@@ -493,6 +494,14 @@ Environment Variables:
         "--metrics",
         type=str,
         help="Comma-separated list of metrics to sync (default: all)",
+    )
+    sync_parser.add_argument(
+        "--resync-days",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Force re-sync of the last N days even if already completed. "
+        "Useful for updating partial data from earlier syncs (default: 0)",
     )
     sync_parser.add_argument(
         "--progress",
