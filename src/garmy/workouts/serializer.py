@@ -231,6 +231,8 @@ class WorkoutSerializer:
                 "conditionTypeKey": EndConditionType.ITERATIONS.value,
             },
             "endConditionValue": float(repeat.iterations),
+            "smartRepeat": False,
+            "skipLastRestStep": repeat.smart_repeat,
             "workoutSteps": child_steps,
         }
 
@@ -441,8 +443,11 @@ class WorkoutSerializer:
             if s.get("type") != "RepeatGroupDTO"
         ]
 
+        smart_repeat = bool(data.get("skipLastRestStep", False))
+
         return RepeatGroup(
             iterations=iterations,
             steps=steps,
             step_order=data.get("stepOrder"),
+            smart_repeat=smart_repeat,
         )

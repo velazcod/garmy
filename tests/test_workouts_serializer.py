@@ -336,6 +336,179 @@ class TestWorkoutSerializerFromApiFormat:
         assert workout.workout_id is None
 
 
+class TestSmartRepeatSerialization:
+    """Test cases for smart_repeat (skip last rest) feature."""
+
+    def test_serialize_smart_repeat_true(self):
+        """Test serialization with smart_repeat=True produces correct API fields."""
+        workout = Workout(name="Test")
+        repeat = RepeatGroup(iterations=3, smart_repeat=True)
+        repeat.add_step(
+            WorkoutStep(
+                step_type=StepType.INTERVAL,
+                end_condition=EndCondition.time_minutes(5),
+            )
+        )
+        repeat.add_step(
+            WorkoutStep(
+                step_type=StepType.REST,
+                end_condition=EndCondition.time_minutes(1),
+            )
+        )
+        workout.add_step(repeat)
+
+        result = WorkoutSerializer.to_api_format(workout)
+        repeat_data = result["workoutSegments"][0]["workoutSteps"][0]
+
+        assert repeat_data["skipLastRestStep"] is True
+        assert repeat_data["smartRepeat"] is False
+
+    def test_serialize_smart_repeat_false_default(self):
+        """Test serialization with smart_repeat=False (default) produces correct API fields."""
+        workout = Workout(name="Test")
+        repeat = RepeatGroup(iterations=3)
+        repeat.add_step(
+            WorkoutStep(
+                step_type=StepType.INTERVAL,
+                end_condition=EndCondition.time_minutes(5),
+            )
+        )
+        workout.add_step(repeat)
+
+        result = WorkoutSerializer.to_api_format(workout)
+        repeat_data = result["workoutSegments"][0]["workoutSteps"][0]
+
+        assert repeat_data["skipLastRestStep"] is False
+        assert repeat_data["smartRepeat"] is False
+
+    def test_parse_skip_last_rest_step_true(self):
+        """Test parsing API response with skipLastRestStep=true."""
+        api_data = {
+            "workoutName": "Test",
+            "sportType": {"sportTypeId": 2, "sportTypeKey": "cycling"},
+            "workoutSegments": [
+                {
+                    "segmentOrder": 1,
+                    "sportType": {"sportTypeId": 2, "sportTypeKey": "cycling"},
+                    "workoutSteps": [
+                        {
+                            "type": "RepeatGroupDTO",
+                            "stepOrder": 1,
+                            "numberOfIterations": 3,
+                            "skipLastRestStep": True,
+                            "smartRepeat": False,
+                            "endCondition": {
+                                "conditionTypeId": 7,
+                                "conditionTypeKey": "iterations",
+                            },
+                            "endConditionValue": 3.0,
+                            "workoutSteps": [
+                                {
+                                    "type": "ExecutableStepDTO",
+                                    "stepOrder": 1,
+                                    "stepType": {
+                                        "stepTypeId": 3,
+                                        "stepTypeKey": "interval",
+                                    },
+                                    "intensityType": {
+                                        "intensityTypeId": 6,
+                                        "intensityTypeKey": "interval",
+                                    },
+                                    "endCondition": {
+                                        "conditionTypeId": 2,
+                                        "conditionValue": 300,
+                                    },
+                                    "targetType": {"targetTypeId": 1},
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        workout = WorkoutSerializer.from_api_format(api_data)
+
+        repeat = workout.steps[0]
+        assert isinstance(repeat, RepeatGroup)
+        assert repeat.smart_repeat is True
+
+    def test_parse_skip_last_rest_step_missing(self):
+        """Test parsing API response without skipLastRestStep defaults to False."""
+        api_data = {
+            "workoutName": "Test",
+            "sportType": {"sportTypeId": 2, "sportTypeKey": "cycling"},
+            "workoutSegments": [
+                {
+                    "segmentOrder": 1,
+                    "sportType": {"sportTypeId": 2, "sportTypeKey": "cycling"},
+                    "workoutSteps": [
+                        {
+                            "type": "RepeatGroupDTO",
+                            "stepOrder": 1,
+                            "numberOfIterations": 2,
+                            "endCondition": {
+                                "conditionTypeId": 7,
+                                "conditionTypeKey": "iterations",
+                            },
+                            "workoutSteps": [
+                                {
+                                    "type": "ExecutableStepDTO",
+                                    "stepOrder": 1,
+                                    "stepType": {
+                                        "stepTypeId": 3,
+                                        "stepTypeKey": "interval",
+                                    },
+                                    "intensityType": {
+                                        "intensityTypeId": 6,
+                                        "intensityTypeKey": "interval",
+                                    },
+                                    "endCondition": {
+                                        "conditionTypeId": 2,
+                                        "conditionValue": 300,
+                                    },
+                                    "targetType": {"targetTypeId": 1},
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        workout = WorkoutSerializer.from_api_format(api_data)
+
+        repeat = workout.steps[0]
+        assert isinstance(repeat, RepeatGroup)
+        assert repeat.smart_repeat is False
+
+    def test_smart_repeat_round_trip(self):
+        """Test smart_repeat=True survives serialization round trip."""
+        original = Workout(name="Smart Repeat Test")
+        repeat = RepeatGroup(iterations=3, smart_repeat=True)
+        repeat.add_step(
+            WorkoutStep(
+                step_type=StepType.INTERVAL,
+                end_condition=EndCondition.time_minutes(5),
+            )
+        )
+        repeat.add_step(
+            WorkoutStep(
+                step_type=StepType.REST,
+                end_condition=EndCondition.time_minutes(1),
+            )
+        )
+        original.add_step(repeat)
+
+        api_format = WorkoutSerializer.to_api_format(original)
+        restored = WorkoutSerializer.from_api_format(api_format)
+
+        restored_repeat = restored.steps[0]
+        assert isinstance(restored_repeat, RepeatGroup)
+        assert restored_repeat.smart_repeat is True
+        assert restored_repeat.iterations == 3
+
+
 class TestWorkoutSerializerRoundTrip:
     """Test round-trip serialization/deserialization."""
 

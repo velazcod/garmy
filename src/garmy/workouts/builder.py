@@ -37,15 +37,19 @@ class RepeatBuilder:
     Created via WorkoutBuilder.repeat() and returns to parent via end_repeat().
     """
 
-    def __init__(self, parent: "WorkoutBuilder", iterations: int) -> None:
+    def __init__(
+        self, parent: "WorkoutBuilder", iterations: int, smart_repeat: bool = False
+    ) -> None:
         """Initialize repeat builder.
 
         Args:
             parent: The parent WorkoutBuilder to return to.
             iterations: Number of times to repeat the steps.
+            smart_repeat: When True, skip the last rest/recovery step in the final iteration.
         """
         self._parent = parent
         self._iterations = iterations
+        self._smart_repeat = smart_repeat
         self._steps: List[WorkoutStep] = []
 
     def _create_step(
@@ -239,7 +243,11 @@ class RepeatBuilder:
 
     def end_repeat(self) -> "WorkoutBuilder":
         """Finish the repeat group and return to the parent builder."""
-        repeat_group = RepeatGroup(iterations=self._iterations, steps=self._steps)
+        repeat_group = RepeatGroup(
+            iterations=self._iterations,
+            steps=self._steps,
+            smart_repeat=self._smart_repeat,
+        )
         self._parent._steps.append(repeat_group)
         return self._parent
 
@@ -523,15 +531,19 @@ class WorkoutBuilder:
         self._steps.append(step)
         return self
 
-    def repeat(self, iterations: int) -> RepeatBuilder:
+    def repeat(self, iterations: int, smart_repeat: bool = False) -> RepeatBuilder:
         """Start a repeat group with the specified number of iterations.
 
         Use end_repeat() on the returned RepeatBuilder to return to this builder.
 
+        Args:
+            iterations: Number of times to repeat the steps.
+            smart_repeat: When True, skip the last rest/recovery step in the final iteration.
+
         Example:
             >>> builder.repeat(3).interval(minutes=5).recovery(minutes=2).end_repeat()
         """
-        return RepeatBuilder(self, iterations)
+        return RepeatBuilder(self, iterations, smart_repeat=smart_repeat)
 
     def add_step(self, step: WorkoutStepOrRepeat) -> "WorkoutBuilder":
         """Add a pre-built step or repeat group."""

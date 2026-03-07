@@ -209,11 +209,13 @@ class RepeatGroup:
         iterations: Number of times to repeat the steps
         steps: List of steps within the repeat group
         step_order: Order within parent workout (set during serialization)
+        smart_repeat: When True, skip the last rest/recovery step in the final iteration
     """
 
     iterations: int = 1
     steps: List[WorkoutStep] = field(default_factory=list)
     step_order: Optional[int] = None
+    smart_repeat: bool = False
 
     def add_step(self, step: WorkoutStep) -> "RepeatGroup":
         """Add a step to the repeat group."""

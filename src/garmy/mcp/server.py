@@ -668,7 +668,9 @@ def _register_workout_tools(mcp: FastMCP, config: MCPConfig) -> None:
             workout_id: The Garmin workout ID to retrieve
 
         Returns:
-            Full workout details including steps and structure
+            Full workout details including steps and structure.
+            Repeat steps include a "skip_last_rest" boolean field indicating
+            whether the last iteration skips its rest/recovery step.
         """
         if workout_id < 1:
             raise ValueError("workout_id must be positive")
@@ -716,6 +718,7 @@ def _register_workout_tools(mcp: FastMCP, config: MCPConfig) -> None:
                             "index": i + 1,
                             "type": "repeat",
                             "iterations": step.iterations,
+                            "skip_last_rest": step.smart_repeat,
                             "steps": [format_nested_step(s) for s in step.steps],
                         }
                     )
@@ -792,12 +795,19 @@ def _register_workout_tools(mcp: FastMCP, config: MCPConfig) -> None:
             - description: Step description text
             - lap_button: true to end step on lap button press (default if no duration/reps specified)
 
-        For repeats: {"type": "repeat", "iterations": 3, "steps": [...]}
+        For repeats:
+            - type: "repeat"
+            - iterations: Number of times to repeat (e.g., 3)
+            - skip_last_rest: When true, the last iteration skips its rest/recovery step.
+              This avoids double-resting when a transition rest follows the repeat block.
+              Recommended for strength training. (default: false)
+            - steps: Array of steps to repeat
 
         IMPORTANT FOR STRENGTH TRAINING:
             - You MUST include "reps" to set the rep count (e.g., "reps": 10)
             - Without "reps", the step defaults to "lap button" end condition
             - The "reps" value is what shows as "Target: X Reps" in Garmin Connect UI
+            - Use "skip_last_rest": true on repeat blocks to avoid double rest periods
 
         Example cycling workout:
             '[{"type": "warmup", "seconds": 300},
@@ -808,7 +818,7 @@ def _register_workout_tools(mcp: FastMCP, config: MCPConfig) -> None:
               {"type": "cooldown", "minutes": 5}]'
 
         Example strength workout (note: reps is REQUIRED for rep-based exercises):
-            '[{"type": "repeat", "iterations": 3, "steps": [
+            '[{"type": "repeat", "iterations": 3, "skip_last_rest": true, "steps": [
                 {"type": "interval", "reps": 10,
                  "exercise_name": "barbell bench press", "weight_value": 185, "weight_unit": "pound"},
                 {"type": "rest", "seconds": 60}
@@ -1041,8 +1051,9 @@ def _register_workout_tools(mcp: FastMCP, config: MCPConfig) -> None:
 
             if step_type == "repeat":
                 iterations = step.get("iterations", 1)
+                skip_last_rest = step.get("skip_last_rest", False)
                 repeat_steps = step.get("steps", [])
-                repeat_builder = builder.repeat(iterations)
+                repeat_builder = builder.repeat(iterations, smart_repeat=skip_last_rest)
 
                 for rs in repeat_steps:
                     rs_type = rs.get("type", "interval").lower()
