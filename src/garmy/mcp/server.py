@@ -605,10 +605,13 @@ def _register_workout_tools(mcp: FastMCP, config: MCPConfig) -> None:
         """Get an authenticated API client using saved tokens."""
         auth_client = AuthClient(token_dir=config.token_dir)
         if not auth_client.is_authenticated:
-            raise ValueError(
-                "Authentication required. Please run 'garmy-sync sync' from the "
-                "command line first to authenticate, then try again."
-            )
+            if auth_client.needs_refresh:
+                auth_client.refresh_tokens()
+            else:
+                raise ValueError(
+                    "Authentication required. Please run 'garmy-sync sync' from the "
+                    "command line first to authenticate, then try again."
+                )
         return APIClient(auth_client=auth_client)
 
     @mcp.tool()
