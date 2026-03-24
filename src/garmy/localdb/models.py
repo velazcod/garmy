@@ -34,6 +34,7 @@ class MetricType(Enum):
     STEPS = "steps"
     CALORIES = "calories"
     BODY_COMPOSITION = "body_composition"
+    SPO2 = "spo2"
 
 
 class TimeSeries(Base):
@@ -195,6 +196,7 @@ class DailyHealthMetric(Base):
     awake_percentage = Column(Float)
 
     average_spo2 = Column(Float)
+    lowest_spo2 = Column(Float)
     average_respiration = Column(Float)
 
     training_readiness_score = Column(Integer)
@@ -204,6 +206,10 @@ class DailyHealthMetric(Base):
     hrv_weekly_avg = Column(Float)
     hrv_last_night_avg = Column(Float)
     hrv_status = Column(Text)
+    hrv_last_night_5min_high = Column(Float)
+    hrv_baseline_low_upper = Column(Float)
+    hrv_baseline_balanced_low = Column(Float)
+    hrv_baseline_balanced_upper = Column(Float)
 
     avg_waking_respiration_value = Column(Float)
     avg_sleep_respiration_value = Column(Float)

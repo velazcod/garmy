@@ -251,6 +251,8 @@ class SyncManager:
                 MetricType.STRESS,
                 MetricType.HEART_RATE,
                 MetricType.RESPIRATION,
+                MetricType.HRV,
+                MetricType.SPO2,
             ]:
                 timeseries_data = self.extractor.extract_timeseries_data(
                     data, metric_type
@@ -768,13 +770,7 @@ class SyncManager:
                 training_readiness_feedback=data.get("feedback"),
             )
         elif metric_type == MetricType.HRV:
-            self.db.store_health_metric(
-                user_id,
-                sync_date,
-                hrv_weekly_avg=data.get("weekly_avg"),
-                hrv_last_night_avg=data.get("last_night_avg"),
-                hrv_status=data.get("status"),
-            )
+            self.db.store_health_metric(user_id, sync_date, **data)
         elif metric_type in [
             MetricType.RESPIRATION,
             MetricType.HEART_RATE,
@@ -782,6 +778,7 @@ class SyncManager:
             MetricType.BODY_BATTERY,
             MetricType.STEPS,
             MetricType.CALORIES,
+            MetricType.SPO2,
         ]:
             # Store all extracted data for these metrics
             self.db.store_health_metric(user_id, sync_date, **data)

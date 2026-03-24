@@ -113,6 +113,13 @@ class HealthDB:
                 ("sleep_wake_time", "VARCHAR"),
                 ("sleep_need_minutes", "INTEGER"),
                 ("skin_temp_deviation_c", "FLOAT"),
+                # SpO2 fields
+                ("lowest_spo2", "FLOAT"),
+                # HRV baseline fields
+                ("hrv_last_night_5min_high", "FLOAT"),
+                ("hrv_baseline_low_upper", "FLOAT"),
+                ("hrv_baseline_balanced_low", "FLOAT"),
+                ("hrv_baseline_balanced_upper", "FLOAT"),
             ]
 
             with self.engine.connect() as conn:
@@ -479,6 +486,7 @@ class HealthDB:
             "rem_sleep_percentage": metric.rem_sleep_percentage,
             "awake_percentage": metric.awake_percentage,
             "average_spo2": metric.average_spo2,
+            "lowest_spo2": metric.lowest_spo2,
             "average_respiration": metric.average_respiration,
             "training_readiness_score": metric.training_readiness_score,
             "training_readiness_level": metric.training_readiness_level,
@@ -486,6 +494,10 @@ class HealthDB:
             "hrv_weekly_avg": metric.hrv_weekly_avg,
             "hrv_last_night_avg": metric.hrv_last_night_avg,
             "hrv_status": metric.hrv_status,
+            "hrv_last_night_5min_high": metric.hrv_last_night_5min_high,
+            "hrv_baseline_low_upper": metric.hrv_baseline_low_upper,
+            "hrv_baseline_balanced_low": metric.hrv_baseline_balanced_low,
+            "hrv_baseline_balanced_upper": metric.hrv_baseline_balanced_upper,
             "avg_waking_respiration_value": metric.avg_waking_respiration_value,
             "avg_sleep_respiration_value": metric.avg_sleep_respiration_value,
             "lowest_respiration_value": metric.lowest_respiration_value,
