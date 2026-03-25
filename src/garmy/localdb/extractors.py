@@ -37,6 +37,12 @@ class DataExtractor:
             return self._extract_body_battery_summary(data)
         elif metric_type == MetricType.SPO2:
             return self._extract_spo2_data(data)
+        elif metric_type == MetricType.RESTING_HEART_RATE:
+            return self._extract_resting_heart_rate_data(data)
+        elif metric_type == MetricType.INTENSITY_MINUTES:
+            return self._extract_intensity_minutes_data(data)
+        elif metric_type == MetricType.FLOORS:
+            return self._extract_floors_data(data)
         elif metric_type == MetricType.BODY_COMPOSITION:
             return self._extract_body_composition_data(data)
         else:
@@ -279,6 +285,35 @@ class DataExtractor:
             "lowest_spo2": getattr(data, "lowest_spo2", None),
         }
 
+    def _extract_resting_heart_rate_data(self, data: Any) -> Dict[str, Any]:
+        """Extract dedicated resting heart rate data."""
+        return {
+            "dedicated_resting_heart_rate": getattr(data, "value", None),
+        }
+
+    def _extract_intensity_minutes_data(self, data: Any) -> Dict[str, Any]:
+        """Extract intensity minutes daily summary.
+
+        - moderate/vigorous: weekly cumulative values from the API
+        - intensity_minutes_total: daily earned total, computed by summing
+          the imValuesArray timeseries (not the weekly cumulative)
+        - intensity_minutes_goal: weekly goal (typically 150)
+        """
+        return {
+            "moderate_intensity_minutes": getattr(data, "moderate_minutes", None),
+            "vigorous_intensity_minutes": getattr(data, "vigorous_minutes", None),
+            # Daily total computed from timeseries, not the weekly cumulative
+            "intensity_minutes_total": getattr(data, "daily_total", None),
+            "intensity_minutes_goal": getattr(data, "week_goal", None),
+        }
+
+    def _extract_floors_data(self, data: Any) -> Dict[str, Any]:
+        """Extract floors data."""
+        return {
+            "floors_ascended": getattr(data, "floors_ascended", None),
+            "floors_descended": getattr(data, "floors_descended", None),
+        }
+
     def _extract_activity_data(self, data: Any) -> Dict[str, Any]:
         """Extract activity data from both parsed and raw formats.
 
@@ -421,6 +456,16 @@ class DataExtractor:
                         timestamp, spo2_value = reading[0], reading[1]
                         if spo2_value is not None:
                             timeseries_data.append((timestamp, spo2_value, {}))
+
+        elif metric_type == MetricType.INTENSITY_MINUTES:
+            # 15-minute interval readings from imValuesArray.
+            # Each entry is [timestamp_ms, intensity_minutes_earned].
+            if hasattr(data, "im_values_array") and data.im_values_array:
+                for reading in data.im_values_array:
+                    if isinstance(reading, (list, tuple)) and len(reading) >= 2:
+                        timestamp, im_value = reading[0], reading[1]
+                        if im_value is not None:
+                            timeseries_data.append((timestamp, int(im_value), {}))
 
         return timeseries_data
 

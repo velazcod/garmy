@@ -83,9 +83,12 @@ from .activities import ActivitySummary
 from .body_battery import BodyBattery
 from .calories import Calories
 from .daily_summary import DailySummary
+from .floors import Floors
 from .heart_rate import HeartRate
 from .hrv import HRV
+from .intensity_minutes import IntensityMinutes
 from .respiration import Respiration
+from .resting_heart_rate import RestingHeartRate
 from .sleep import Sleep
 from .spo2 import SpO2
 from .steps import Steps
@@ -93,13 +96,16 @@ from .stress import Stress
 from .training_readiness import TrainingReadiness
 
 __all__: List[str] = [
+    "Floors",
     "HRV",
     "ActivitySummary",
     "BodyBattery",
     "Calories",
     "DailySummary",
     "HeartRate",
+    "IntensityMinutes",
     "Respiration",
+    "RestingHeartRate",
     "Sleep",
     "SpO2",
     "Steps",

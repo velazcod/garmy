@@ -115,6 +115,16 @@ class HealthDB:
                 ("skin_temp_deviation_c", "FLOAT"),
                 # SpO2 fields
                 ("lowest_spo2", "FLOAT"),
+                # Intensity minutes
+                ("moderate_intensity_minutes", "INTEGER"),
+                ("vigorous_intensity_minutes", "INTEGER"),
+                ("intensity_minutes_total", "INTEGER"),
+                ("intensity_minutes_goal", "INTEGER"),
+                # Floors
+                ("floors_ascended", "INTEGER"),
+                ("floors_descended", "INTEGER"),
+                # Dedicated resting HR
+                ("dedicated_resting_heart_rate", "INTEGER"),
                 # HRV baseline fields
                 ("hrv_last_night_5min_high", "FLOAT"),
                 ("hrv_baseline_low_upper", "FLOAT"),
@@ -502,6 +512,16 @@ class HealthDB:
             "avg_sleep_respiration_value": metric.avg_sleep_respiration_value,
             "lowest_respiration_value": metric.lowest_respiration_value,
             "highest_respiration_value": metric.highest_respiration_value,
+            # Intensity minutes
+            "moderate_intensity_minutes": metric.moderate_intensity_minutes,
+            "vigorous_intensity_minutes": metric.vigorous_intensity_minutes,
+            "intensity_minutes_total": metric.intensity_minutes_total,
+            "intensity_minutes_goal": metric.intensity_minutes_goal,
+            # Floors
+            "floors_ascended": metric.floors_ascended,
+            "floors_descended": metric.floors_descended,
+            # Dedicated resting HR
+            "dedicated_resting_heart_rate": metric.dedicated_resting_heart_rate,
             # Sleep enhancements
             "sleep_score": metric.sleep_score,
             "sleep_score_qualifier": metric.sleep_score_qualifier,
