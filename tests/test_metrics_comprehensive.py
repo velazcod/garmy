@@ -78,6 +78,7 @@ class TestMetricsPackageInit:
         import garmy.metrics as metrics_module
 
         expected_exports = {
+            "EnduranceScore",
             "Floors",
             "HRV",
             "ActivitySummary",
@@ -93,6 +94,7 @@ class TestMetricsPackageInit:
             "Steps",
             "Stress",
             "TrainingReadiness",
+            "TrainingStatus",
         }
 
         actual_exports = set(metrics_module.__all__)

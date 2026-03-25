@@ -45,6 +45,10 @@ class DataExtractor:
             return self._extract_floors_data(data)
         elif metric_type == MetricType.BODY_COMPOSITION:
             return self._extract_body_composition_data(data)
+        elif metric_type == MetricType.TRAINING_STATUS:
+            return self._extract_training_status_data(data)
+        elif metric_type == MetricType.ENDURANCE_SCORE:
+            return self._extract_endurance_score_data(data)
         else:
             return None
 
@@ -312,6 +316,28 @@ class DataExtractor:
         return {
             "floors_ascended": getattr(data, "floors_ascended", None),
             "floors_descended": getattr(data, "floors_descended", None),
+        }
+
+    def _extract_training_status_data(self, data: Any) -> Dict[str, Any]:
+        """Extract training status and load data for performance_metrics table."""
+        return {
+            "acute_load": getattr(data, "acute_load", None),
+            "chronic_load": getattr(data, "chronic_load", None),
+            "load_balance": getattr(data, "load_balance", None),
+            "load_type": getattr(data, "load_type", None),
+            "training_status": getattr(data, "training_status", None),
+            "training_status_feedback": getattr(
+                data, "training_status_feedback", None
+            ),
+        }
+
+    def _extract_endurance_score_data(self, data: Any) -> Dict[str, Any]:
+        """Extract endurance score data for performance_metrics table."""
+        return {
+            "endurance_score": getattr(data, "endurance_score", None),
+            "endurance_score_classification": getattr(
+                data, "endurance_score_classification", None
+            ),
         }
 
     def _extract_activity_data(self, data: Any) -> Dict[str, Any]:

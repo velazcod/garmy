@@ -15,6 +15,7 @@ from .models import (
     DailyHealthMetric,
     ExerciseSet,
     MetricType,
+    PerformanceMetric,
     SyncStatus,
     TimeSeries,
 )
@@ -170,6 +171,7 @@ class HealthDB:
                 "exercise_sets",
                 "activity_splits",
                 "body_composition",
+                "performance_metrics",
             }
             actual_tables = set(Base.metadata.tables.keys())
             return expected_tables.issubset(actual_tables)
@@ -244,6 +246,30 @@ class HealthDB:
                 metric = DailyHealthMetric(user_id=user_id, metric_date=metric_date)
 
             # Update fields from kwargs
+            for field, value in kwargs.items():
+                if hasattr(metric, field):
+                    setattr(metric, field, value)
+
+            session.merge(metric)
+            session.commit()
+
+    def store_performance_metric(self, user_id: int, metric_date: date, **kwargs):
+        """Store performance metric data (training load/status, endurance score)."""
+        with self.get_session() as session:
+            metric = (
+                session.query(PerformanceMetric)
+                .filter(
+                    and_(
+                        PerformanceMetric.user_id == user_id,
+                        PerformanceMetric.metric_date == metric_date,
+                    )
+                )
+                .first()
+            )
+
+            if metric is None:
+                metric = PerformanceMetric(user_id=user_id, metric_date=metric_date)
+
             for field, value in kwargs.items():
                 if hasattr(metric, field):
                     setattr(metric, field, value)

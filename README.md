@@ -180,6 +180,14 @@ Garmy provides access to a comprehensive set of Garmin Connect metrics:
 | `training_readiness` | Training readiness scores and factors | `api_client.metrics.get('training_readiness').get()` |
 | `body_battery` | Body battery energy levels | `api_client.metrics.get('body_battery').get()` |
 | `activities` | Activity summaries and details | `api_client.metrics.get('activities').list(days=30)` |
+| `hrv` | Heart rate variability with sleep readings | `api_client.metrics.get('hrv').get()` |
+| `spo2` | Blood oxygen saturation with hourly averages | `api_client.metrics.get('spo2').get()` |
+| `respiration` | Breathing rate (waking and sleep) | `api_client.metrics.get('respiration').get()` |
+| `resting_heart_rate` | Dedicated resting HR from user stats | `api_client.metrics.get('resting_heart_rate').get()` |
+| `intensity_minutes` | Moderate/vigorous intensity with timeseries | `api_client.metrics.get('intensity_minutes').get()` |
+| `floors` | Floors climbed and descended | `api_client.metrics.get('floors').get()` |
+| `training_status` | Training status, load balance (acute/chronic) | `api_client.metrics.get('training_status').get()` |
+| `endurance_score` | Endurance score with classification | `api_client.metrics.get('endurance_score').get()` |
 
 ## 🧑‍💻 Architecture Overview
 
