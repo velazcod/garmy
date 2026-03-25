@@ -163,19 +163,24 @@ class HealthDB:
         self, user_id: int, metric_type: MetricType, data: List[tuple]
     ):
         """Store batch of timeseries data."""
+        import math
+
         with self.get_session() as session:
-            for timestamp, value, metadata in data:
-                # Skip entries with None values (NOT NULL constraint)
-                if value is None:
-                    continue
-                timeseries = TimeSeries(
-                    user_id=user_id,
-                    metric_type=metric_type.value,
-                    timestamp=timestamp,
-                    value=value,
-                    meta_data=metadata,
-                )
-                session.merge(timeseries)
+            with session.no_autoflush:
+                for timestamp, value, metadata in data:
+                    # Skip entries with None/NaN values (NOT NULL constraint)
+                    if value is None or (
+                        isinstance(value, float) and math.isnan(value)
+                    ):
+                        continue
+                    timeseries = TimeSeries(
+                        user_id=user_id,
+                        metric_type=metric_type.value,
+                        timestamp=timestamp,
+                        value=value,
+                        meta_data=metadata,
+                    )
+                    session.merge(timeseries)
             session.commit()
 
     def store_activity(self, user_id: int, activity_data: Dict[str, Any]):
