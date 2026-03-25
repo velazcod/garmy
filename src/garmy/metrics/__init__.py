@@ -16,6 +16,12 @@ Available Metrics:
     Calories: Daily calorie data including burned, active, BMR, and goal tracking
     DailySummary: Comprehensive daily summary with all major health metrics in one place
     Activities: Activity summaries with type, duration, heart rate, and basic performance data
+    SpO2: Blood oxygen saturation with hourly average readings
+    RestingHeartRate: Dedicated resting heart rate from user stats service
+    IntensityMinutes: Moderate/vigorous intensity minutes with 15-min timeseries
+    Floors: Floors climbed and descended throughout the day
+    TrainingStatus: Training status, acute/chronic load balance
+    EnduranceScore: Endurance score with classification level
 
 Modern API Usage:
     >>> from garmy import AuthClient, APIClient
