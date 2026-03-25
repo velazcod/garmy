@@ -253,6 +253,7 @@ class SyncManager:
                 MetricType.RESPIRATION,
                 MetricType.HRV,
                 MetricType.SPO2,
+                MetricType.INTENSITY_MINUTES,
             ]:
                 timeseries_data = self.extractor.extract_timeseries_data(
                     data, metric_type
@@ -779,6 +780,9 @@ class SyncManager:
             MetricType.STEPS,
             MetricType.CALORIES,
             MetricType.SPO2,
+            MetricType.RESTING_HEART_RATE,
+            MetricType.INTENSITY_MINUTES,
+            MetricType.FLOORS,
         ]:
             # Store all extracted data for these metrics
             self.db.store_health_metric(user_id, sync_date, **data)

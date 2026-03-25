@@ -23,7 +23,9 @@ daily_health_metrics (Primary health data)
 ├── Stress: avg_stress_level, max_stress_level
 ├── Body Battery: body_battery_high, body_battery_low
 ├── Training: training_readiness_score, training_readiness_level
-└── HRV: hrv_weekly_avg, hrv_last_night_avg, hrv_status
+├── HRV: hrv_weekly_avg, hrv_last_night_avg, hrv_status
+├── Intensity: moderate_intensity_minutes, vigorous_intensity_minutes
+└── Floors: floors_ascended, floors_descended
 
 timeseries (High-frequency data)
 ├── user_id, metric_type, timestamp (PK)
@@ -120,6 +122,19 @@ avg_sleep_respiration_value FLOAT
 lowest_respiration_value FLOAT
 highest_respiration_value FLOAT
 
+-- Intensity Minutes
+moderate_intensity_minutes INTEGER -- Weekly cumulative moderate minutes (from API)
+vigorous_intensity_minutes INTEGER -- Weekly cumulative vigorous minutes (from API)
+intensity_minutes_total INTEGER    -- Daily earned total (sum of 15-min timeseries)
+intensity_minutes_goal INTEGER     -- Weekly goal (typically 150)
+
+-- Floors
+floors_ascended      INTEGER    -- Floors climbed during the day
+floors_descended     INTEGER    -- Floors descended during the day
+
+-- Dedicated Resting HR
+dedicated_resting_heart_rate INTEGER -- From dedicated userstats endpoint
+
 -- Training and HRV
 training_readiness_score INTEGER  -- Training readiness (0-100)
 training_readiness_level TEXT     -- Readiness level description
@@ -158,6 +173,7 @@ meta_data    JSON       -- Additional metadata (optional)
 - `respiration` - Respiration rate readings
 - `hrv` - Heart rate variability readings (during sleep)
 - `spo2` - Blood oxygen saturation readings (overnight)
+- `intensity_minutes` - Intensity minutes earned (15-min intervals)
 
 ### `activities`
 **Purpose:** Individual workouts and physical activities
@@ -518,7 +534,7 @@ All tables use `user_id` as the primary identifier, allowing multi-user support.
 Supported metric types in `sync_status` and `timeseries`:
 - `DAILY_SUMMARY`
 - `SLEEP`
-- `ACTIVITIES` 
+- `ACTIVITIES`
 - `BODY_BATTERY`
 - `STRESS`
 - `HEART_RATE`
@@ -528,6 +544,9 @@ Supported metric types in `sync_status` and `timeseries`:
 - `STEPS`
 - `CALORIES`
 - `SPO2`
+- `RESTING_HEART_RATE`
+- `INTENSITY_MINUTES`
+- `FLOORS`
 
 ## 🔧 Performance Considerations
 

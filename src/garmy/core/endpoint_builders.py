@@ -225,3 +225,26 @@ def build_daily_summary_endpoint(
     """Build daily summary endpoint URL."""
     builder = UserSummaryEndpointBuilder("daily summary", "")
     return builder.build(date_input, api_client, **kwargs)
+
+
+class UserStatsEndpointBuilder(BaseEndpointBuilder):
+    """Builder for user stats service endpoints (e.g. resting heart rate)."""
+
+    def get_endpoint_name(self) -> str:
+        """Get the name of this endpoint."""
+        return "resting heart rate"
+
+    def build_endpoint_url(self, user_id: str, date_str: str, **kwargs: Any) -> str:
+        """Build user stats service URL."""
+        return (
+            f"/userstats-service/wellness/daily/{user_id}"
+            f"?fromDate={date_str}&untilDate={date_str}"
+        )
+
+
+def build_resting_heart_rate_endpoint(
+    date_input: Union["date", str, None] = None, api_client: Any = None, **kwargs: Any
+) -> str:
+    """Build resting heart rate endpoint URL."""
+    builder = UserStatsEndpointBuilder()
+    return builder.build(date_input, api_client, **kwargs)

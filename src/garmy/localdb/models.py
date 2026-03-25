@@ -35,6 +35,9 @@ class MetricType(Enum):
     CALORIES = "calories"
     BODY_COMPOSITION = "body_composition"
     SPO2 = "spo2"
+    RESTING_HEART_RATE = "resting_heart_rate"
+    INTENSITY_MINUTES = "intensity_minutes"
+    FLOORS = "floors"
 
 
 class TimeSeries(Base):
@@ -215,6 +218,22 @@ class DailyHealthMetric(Base):
     avg_sleep_respiration_value = Column(Float)
     lowest_respiration_value = Column(Float)
     highest_respiration_value = Column(Float)
+
+    # Intensity minutes
+    # moderate/vigorous are weekly cumulative values from the API
+    moderate_intensity_minutes = Column(Integer)
+    vigorous_intensity_minutes = Column(Integer)
+    # Daily total: sum of 15-min timeseries values (not weekly cumulative)
+    intensity_minutes_total = Column(Integer)
+    # Weekly goal (typically 150)
+    intensity_minutes_goal = Column(Integer)
+
+    # Floors
+    floors_ascended = Column(Integer)
+    floors_descended = Column(Integer)
+
+    # Dedicated resting HR (separate from daily_summary/heart_rate sources)
+    dedicated_resting_heart_rate = Column(Integer)
 
     # Sleep enhancements
     sleep_score = Column(Integer)  # 0-100 overall score
