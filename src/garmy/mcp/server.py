@@ -325,7 +325,7 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
         - Health metrics: "SELECT metric_date, sleep_duration_hours FROM daily_health_metrics WHERE user_id = 1 ORDER BY metric_date DESC LIMIT 10"
         - Activities: "SELECT activity_date, activity_name, duration_seconds FROM activities WHERE user_id = 1"
         - High step days: "SELECT metric_date, total_steps FROM daily_health_metrics WHERE total_steps > 10000"
-        - Timeseries data: "SELECT timestamp, value FROM timeseries WHERE metric_type = 'heart_rate'"
+        - Timeseries data (timestamp is epoch ms): "SELECT datetime(timestamp/1000, 'unixepoch', 'localtime') as ts, value FROM timeseries WHERE metric_type = 'heart_rate' AND timestamp/1000 BETWEEN unixepoch('2026-01-01', 'localtime') AND unixepoch('2026-01-02', 'localtime')"
 
         Returns:
             List of matching records as dictionaries
@@ -1192,7 +1192,7 @@ def _get_table_description(table_name: str) -> str:
     """Get human-readable description for table."""
     descriptions = {
         "daily_health_metrics": "Daily health summaries including steps, sleep, heart rate, stress, and other key metrics",
-        "timeseries": "High-frequency data like heart rate readings throughout the day, stress levels, body battery",
+        "timeseries": "High-frequency data like heart rate readings throughout the day, stress levels, body battery. IMPORTANT: timestamp column is epoch milliseconds (not seconds) — use datetime(timestamp/1000, 'unixepoch', 'localtime') for date filtering and display",
         "activities": "Individual workouts and physical activities with performance metrics",
         "sync_status": "System table tracking data synchronization status (usually not needed for health analysis)",
         "performance_metrics": "Post-activity performance metrics: training load/status, endurance score (updated after activities, not daily)",
@@ -1229,6 +1229,7 @@ def _get_health_data_guide() -> str:
 ### timeseries
 **WHAT**: High-frequency data throughout the day
 **CONTAINS**: heart rate readings, stress measurements, body battery levels with timestamps
+**IMPORTANT**: The `timestamp` column stores epoch milliseconds (not seconds). Use `datetime(timestamp/1000, 'unixepoch', 'localtime')` for human-readable times and `timestamp/1000 BETWEEN unixepoch('2026-01-01', 'localtime') AND unixepoch('2026-01-02', 'localtime')` for date filtering.
 **USE CASE**: Detailed intraday analysis
 
 ### performance_metrics
