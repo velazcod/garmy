@@ -754,10 +754,19 @@ class SyncManager:
 
             return [self.db._activity_to_dict(a) for a in activities]
 
+    # Performance metrics stored in separate table (update after activities, not daily)
+    PERFORMANCE_METRIC_TYPES = {
+        MetricType.TRAINING_STATUS,
+        MetricType.ENDURANCE_SCORE,
+    }
+
     def _store_health_metric(
         self, user_id: int, sync_date: date, metric_type: MetricType, data: Dict
     ):
         """Store health metric data in normalized table."""
+        if metric_type in self.PERFORMANCE_METRIC_TYPES:
+            self.db.store_performance_metric(user_id, sync_date, **data)
+            return
         if metric_type == MetricType.DAILY_SUMMARY:
             self.db.store_health_metric(user_id, sync_date, **data)
         elif metric_type == MetricType.SLEEP:

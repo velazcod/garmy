@@ -6,7 +6,7 @@ Complete reference for Garmy's LocalDB database schema and structure.
 
 The Garmy LocalDB uses SQLite with optimized tables for health data storage:
 
-- **6 main tables** for different data types
+- **7 main tables** for different data types
 - **Normalized structure** for efficient querying
 - **Dedicated columns** for common health metrics
 - **Sync tracking** for data integrity
@@ -57,6 +57,13 @@ activity_splits (Cardio lap/split data)
 ├── avg_cadence, max_cadence, calories
 ├── start_latitude, start_longitude, end_latitude, end_longitude
 └── intensity_type, created_at
+
+performance_metrics (Post-activity performance metrics)
+├── user_id, metric_date (PK)
+├── Training Load: acute_load, chronic_load, load_balance, load_type
+├── Training Status: training_status (int code), training_status_feedback
+├── Endurance: endurance_score, endurance_score_classification (int code)
+└── created_at, updated_at
 
 sync_status (Sync tracking)
 ├── user_id, sync_date, metric_type (PK)
@@ -336,6 +343,38 @@ created_at   DATETIME   -- Record creation time
 - `failed` - Sync failed with error
 - `skipped` - No data available or already exists
 
+### `performance_metrics`
+**Purpose:** Post-activity performance metrics that update irregularly (after activities, not daily)
+
+**Primary Key:** `(user_id, metric_date)`
+
+**Columns:**
+```sql
+user_id                          INTEGER  -- User identifier
+metric_date                      DATE     -- Date of metric
+-- Training Load (from acuteTrainingLoadDTO)
+acute_load                       FLOAT    -- 7-day rolling training load
+chronic_load                     FLOAT    -- 28-day rolling training load
+load_balance                     FLOAT    -- Acute/chronic load ratio
+load_type                        TEXT     -- OPTIMAL, OVERREACHING, etc.
+-- Training Status (numeric code + feedback phrase)
+training_status                  INTEGER  -- Numeric code: 1=DETRAINING, 2=RECOVERY, 3=UNPRODUCTIVE, 4=MAINTAINING, 5=PRODUCTIVE, 6=PEAKING, 7=OVERREACHING
+training_status_feedback         TEXT     -- Feedback phrase (e.g. "MAINTAINING_1")
+-- Endurance Score
+endurance_score                  FLOAT    -- Absolute score (e.g. 4508)
+endurance_score_classification   INTEGER  -- Numeric code: 1=RECREATIONAL, 2=INTERMEDIATE, 3=TRAINED, 4=WELL_TRAINED, 5=EXPERT, 6=SUPERIOR, 7=ELITE
+-- Metadata
+created_at                       DATETIME -- Record creation time
+updated_at                       DATETIME -- Last update time
+```
+
+**Query Pattern:** Use "last known value" since these update irregularly:
+```sql
+SELECT * FROM performance_metrics
+WHERE user_id = 1 AND metric_date <= '2026-03-24'
+ORDER BY metric_date DESC LIMIT 1;
+```
+
 ## 🔍 Common Queries
 
 ### Daily Health Trends
@@ -547,6 +586,8 @@ Supported metric types in `sync_status` and `timeseries`:
 - `RESTING_HEART_RATE`
 - `INTENSITY_MINUTES`
 - `FLOORS`
+- `TRAINING_STATUS`
+- `ENDURANCE_SCORE`
 
 ## 🔧 Performance Considerations
 

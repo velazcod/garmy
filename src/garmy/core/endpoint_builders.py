@@ -248,3 +248,36 @@ def build_resting_heart_rate_endpoint(
     """Build resting heart rate endpoint URL."""
     builder = UserStatsEndpointBuilder()
     return builder.build(date_input, api_client, **kwargs)
+
+
+class EnduranceScoreEndpointBuilder(BaseEndpointBuilder):
+    """Builder for endurance score endpoint (uses query params, no user_id)."""
+
+    def get_endpoint_name(self) -> str:
+        """Get the name of this endpoint."""
+        return "endurance score"
+
+    def build_endpoint_url(self, user_id: str, date_str: str, **kwargs: Any) -> str:
+        """Build endurance score URL with query parameters."""
+        return (
+            f"/metrics-service/metrics/endurancescore"
+            f"?startDate={date_str}&endDate={date_str}&aggregation=daily"
+        )
+
+    def build(
+        self,
+        date_input: Union["date", str, None] = None,
+        api_client: Any = None,
+        **kwargs: Any,
+    ) -> str:
+        """Build endpoint URL without requiring user_id."""
+        date_str = format_date(date_input)
+        return self.build_endpoint_url("", date_str, **kwargs)
+
+
+def build_endurance_score_endpoint(
+    date_input: Union["date", str, None] = None, api_client: Any = None, **kwargs: Any
+) -> str:
+    """Build endurance score endpoint URL."""
+    builder = EnduranceScoreEndpointBuilder()
+    return builder.build(date_input, api_client, **kwargs)

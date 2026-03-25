@@ -94,8 +94,11 @@ from .spo2 import SpO2
 from .steps import Steps
 from .stress import Stress
 from .training_readiness import TrainingReadiness
+from .training_status import TrainingStatus
+from .endurance_score import EnduranceScore
 
 __all__: List[str] = [
+    "EnduranceScore",
     "Floors",
     "HRV",
     "ActivitySummary",
@@ -111,4 +114,5 @@ __all__: List[str] = [
     "Steps",
     "Stress",
     "TrainingReadiness",
+    "TrainingStatus",
 ]

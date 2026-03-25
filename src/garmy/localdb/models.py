@@ -38,6 +38,8 @@ class MetricType(Enum):
     RESTING_HEART_RATE = "resting_heart_rate"
     INTENSITY_MINUTES = "intensity_minutes"
     FLOORS = "floors"
+    TRAINING_STATUS = "training_status"
+    ENDURANCE_SCORE = "endurance_score"
 
 
 class TimeSeries(Base):
@@ -289,3 +291,34 @@ class BodyComposition(Base):
     # Metadata
     source_type = Column(String)  # e.g., "INDEX_SCALE"
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PerformanceMetric(Base):
+    """Post-activity performance metrics (training load/status, endurance score).
+
+    These metrics update irregularly after activities, not on a fixed daily schedule.
+    Stored separately from daily_health_metrics to avoid NULLs on rest days.
+    """
+
+    __tablename__ = "performance_metrics"
+
+    user_id = Column(Integer, primary_key=True, nullable=False)
+    metric_date = Column(Date, primary_key=True, nullable=False)
+
+    # Training Load (from acuteTrainingLoadDTO)
+    acute_load = Column(Float)  # 7-day rolling
+    chronic_load = Column(Float)  # 28-day rolling
+    load_balance = Column(Float)  # acute / chronic ratio
+    load_type = Column(Text)  # OPTIMAL, OVERREACHING, etc.
+
+    # Training Status (numeric code + feedback phrase)
+    training_status = Column(Integer)  # Numeric code (see TrainingStatus.STATUS_MAP)
+    training_status_feedback = Column(Text)  # e.g. "MAINTAINING_1"
+
+    # Endurance Score
+    endurance_score = Column(Float)  # Absolute value (e.g. 4508)
+    endurance_score_classification = Column(Integer)  # Numeric code (see EnduranceScore.CLASSIFICATION_MAP)
+
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

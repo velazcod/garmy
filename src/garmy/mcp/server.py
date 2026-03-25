@@ -479,7 +479,8 @@ def _register_sync_tool(mcp: FastMCP, config: MCPConfig) -> None:
             metrics: Comma-separated list of metrics to sync (default: all).
                      Available: DAILY_SUMMARY, SLEEP, HEART_RATE, STEPS, STRESS,
                      BODY_BATTERY, HRV, CALORIES, RESPIRATION, TRAINING_READINESS,
-                     ACTIVITIES, BODY_COMPOSITION
+                     ACTIVITIES, BODY_COMPOSITION, SPO2, RESTING_HEART_RATE,
+                     INTENSITY_MINUTES, FLOORS, TRAINING_STATUS, ENDURANCE_SCORE
             user_id: User ID for database records (default: 1)
             resync_days: Force re-sync of the last N days even if already completed.
                          Useful for updating partial data from earlier syncs (default: 0, max: 7)
@@ -1194,6 +1195,7 @@ def _get_table_description(table_name: str) -> str:
         "timeseries": "High-frequency data like heart rate readings throughout the day, stress levels, body battery",
         "activities": "Individual workouts and physical activities with performance metrics",
         "sync_status": "System table tracking data synchronization status (usually not needed for health analysis)",
+        "performance_metrics": "Post-activity performance metrics: training load/status, endurance score (updated after activities, not daily)",
     }
     return descriptions.get(table_name, "Health data table")
 
@@ -1228,6 +1230,13 @@ def _get_health_data_guide() -> str:
 **WHAT**: High-frequency data throughout the day
 **CONTAINS**: heart rate readings, stress measurements, body battery levels with timestamps
 **USE CASE**: Detailed intraday analysis
+
+### performance_metrics
+**WHAT**: Post-activity computed performance metrics
+**CONTAINS**: training load (acute/chronic), training status, endurance score with classification
+**NOTE**: Updated after activities, not daily. Use "last known value" pattern:
+- Latest values: `SELECT * FROM performance_metrics WHERE user_id = 1 AND metric_date <= date('now') ORDER BY metric_date DESC LIMIT 1`
+- Training status trend: `SELECT metric_date, training_status, load_type FROM performance_metrics WHERE training_status IS NOT NULL ORDER BY metric_date`
 
 ## Health Metrics Available
 - **Steps & Movement**: total_steps, total_distance_meters
