@@ -87,6 +87,7 @@ from .heart_rate import HeartRate
 from .hrv import HRV
 from .respiration import Respiration
 from .sleep import Sleep
+from .spo2 import SpO2
 from .steps import Steps
 from .stress import Stress
 from .training_readiness import TrainingReadiness
@@ -100,6 +101,7 @@ __all__: List[str] = [
     "HeartRate",
     "Respiration",
     "Sleep",
+    "SpO2",
     "Steps",
     "Stress",
     "TrainingReadiness",

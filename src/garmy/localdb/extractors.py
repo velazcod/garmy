@@ -35,6 +35,8 @@ class DataExtractor:
             return self._extract_stress_summary(data)
         elif metric_type == MetricType.BODY_BATTERY:
             return self._extract_body_battery_summary(data)
+        elif metric_type == MetricType.SPO2:
+            return self._extract_spo2_data(data)
         elif metric_type == MetricType.BODY_COMPOSITION:
             return self._extract_body_composition_data(data)
         else:
@@ -204,11 +206,26 @@ class DataExtractor:
         """Extract HRV using nested summary."""
         hrv_summary = getattr(data, "hrv_summary", None)
         if hrv_summary:
-            return {
-                "weekly_avg": getattr(hrv_summary, "weekly_avg", None),
-                "last_night_avg": getattr(hrv_summary, "last_night_avg", None),
-                "status": getattr(hrv_summary, "status", None),
+            result = {
+                "hrv_weekly_avg": getattr(hrv_summary, "weekly_avg", None),
+                "hrv_last_night_avg": getattr(hrv_summary, "last_night_avg", None),
+                "hrv_status": getattr(hrv_summary, "status", None),
+                "hrv_last_night_5min_high": getattr(
+                    hrv_summary, "last_night_5_min_high", None
+                ),
             }
+            baseline = getattr(hrv_summary, "baseline", None)
+            if baseline:
+                result["hrv_baseline_low_upper"] = getattr(
+                    baseline, "low_upper", None
+                )
+                result["hrv_baseline_balanced_low"] = getattr(
+                    baseline, "balanced_low", None
+                )
+                result["hrv_baseline_balanced_upper"] = getattr(
+                    baseline, "balanced_upper", None
+                )
+            return result
         return {}
 
     def _extract_respiration_summary(self, data: Any) -> Dict[str, Any]:
@@ -254,6 +271,13 @@ class DataExtractor:
             return result
 
         return {}
+
+    def _extract_spo2_data(self, data: Any) -> Dict[str, Any]:
+        """Extract SpO2 daily summary data."""
+        return {
+            "average_spo2": getattr(data, "average_spo2", None),
+            "lowest_spo2": getattr(data, "lowest_spo2", None),
+        }
 
     def _extract_activity_data(self, data: Any) -> Dict[str, Any]:
         """Extract activity data from both parsed and raw formats.
@@ -366,6 +390,37 @@ class DataExtractor:
             if hasattr(data, "respiration_readings") and data.respiration_readings:
                 for reading in data.respiration_readings:
                     timeseries_data.append((reading.timestamp, reading.value, {}))
+
+        elif metric_type == MetricType.HRV:
+            if hasattr(data, "hrv_readings") and data.hrv_readings:
+                from datetime import datetime
+
+                for reading in data.hrv_readings:
+                    if reading.hrv_value is None:
+                        continue
+                    # Convert ISO timestamp string to unix ms
+                    if reading.reading_time_gmt:
+                        try:
+                            dt = datetime.fromisoformat(
+                                reading.reading_time_gmt.replace("Z", "+00:00")
+                            )
+                            timestamp_ms = int(dt.timestamp() * 1000)
+                            timeseries_data.append(
+                                (timestamp_ms, reading.hrv_value, {})
+                            )
+                        except (ValueError, OSError):
+                            continue
+
+        elif metric_type == MetricType.SPO2:
+            if (
+                hasattr(data, "spo2_hourly_averages")
+                and data.spo2_hourly_averages
+            ):
+                for reading in data.spo2_hourly_averages:
+                    if isinstance(reading, (list, tuple)) and len(reading) >= 2:
+                        timestamp, spo2_value = reading[0], reading[1]
+                        if spo2_value is not None:
+                            timeseries_data.append((timestamp, spo2_value, {}))
 
         return timeseries_data
 

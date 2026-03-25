@@ -109,8 +109,11 @@ light_sleep_percentage FLOAT    -- % of sleep in light
 rem_sleep_percentage FLOAT      -- % of sleep in REM
 awake_percentage     FLOAT      -- % of time awake
 
--- Respiration and SpO2
+-- SpO2
 average_spo2         FLOAT      -- Average blood oxygen
+lowest_spo2          FLOAT      -- Lowest SpO2 reading
+
+-- Respiration
 average_respiration  FLOAT      -- Average respiration rate
 avg_waking_respiration_value FLOAT
 avg_sleep_respiration_value FLOAT
@@ -124,6 +127,10 @@ training_readiness_feedback TEXT  -- Readiness feedback
 hrv_weekly_avg       FLOAT       -- Weekly HRV average
 hrv_last_night_avg   FLOAT       -- Last night HRV
 hrv_status           TEXT        -- HRV status description
+hrv_last_night_5min_high FLOAT   -- Last night 5-min high HRV
+hrv_baseline_low_upper FLOAT     -- Baseline range: low upper boundary
+hrv_baseline_balanced_low FLOAT  -- Baseline range: balanced lower boundary
+hrv_baseline_balanced_upper FLOAT -- Baseline range: balanced upper boundary
 
 -- Timestamps
 created_at           DATETIME    -- Record creation time
@@ -146,9 +153,11 @@ meta_data    JSON       -- Additional metadata (optional)
 
 **Common Metric Types:**
 - `heart_rate` - Heart rate readings
-- `stress` - Stress level measurements  
+- `stress` - Stress level measurements
 - `body_battery` - Body battery levels
 - `respiration` - Respiration rate readings
+- `hrv` - Heart rate variability readings (during sleep)
+- `spo2` - Blood oxygen saturation readings (overnight)
 
 ### `activities`
 **Purpose:** Individual workouts and physical activities
@@ -518,6 +527,7 @@ Supported metric types in `sync_status` and `timeseries`:
 - `RESPIRATION`
 - `STEPS`
 - `CALORIES`
+- `SPO2`
 
 ## 🔧 Performance Considerations
 

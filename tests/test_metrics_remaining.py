@@ -467,6 +467,7 @@ class TestMetricsModuleStructure:
             "calories",
             "daily_summary",
             "respiration",
+            "spo2",
             "steps",
             "stress",
         ]
@@ -489,6 +490,7 @@ class TestMetricsModuleStructure:
             HeartRate,
             Respiration,
             Sleep,
+            SpO2,
             Steps,
             Stress,
             TrainingReadiness,
@@ -503,6 +505,7 @@ class TestMetricsModuleStructure:
             HeartRate,
             Respiration,
             Sleep,
+            SpO2,
             Steps,
             Stress,
             TrainingReadiness,
@@ -525,6 +528,7 @@ class TestMetricsModuleStructure:
             "calories",
             "daily_summary",
             "respiration",
+            "spo2",
             "steps",
             "stress",
         ]
@@ -571,6 +575,7 @@ class TestMetricsModuleStructure:
             "calories",
             "daily_summary",
             "respiration",
+            "spo2",
             "steps",
             "stress",
         ]
