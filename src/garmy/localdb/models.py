@@ -40,6 +40,7 @@ class MetricType(Enum):
     FLOORS = "floors"
     TRAINING_STATUS = "training_status"
     ENDURANCE_SCORE = "endurance_score"
+    HEALTH_SNAPSHOT = "health_snapshot"
 
 
 class TimeSeries(Base):
@@ -322,3 +323,67 @@ class PerformanceMetric(Base):
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class HealthSnapshotRecord(Base):
+    """Health Snapshot recording (~2-min on-demand multi-metric measurement).
+
+    One row per snapshot. Each snapshot has 6 related summary stats (in
+    health_snapshot_summaries) and 6 zone time entries (in health_snapshot_zones),
+    keyed by (user_id, activity_uuid).
+    """
+
+    __tablename__ = "health_snapshots"
+
+    user_id = Column(Integer, primary_key=True, nullable=False)
+    activity_uuid = Column(String, primary_key=True, nullable=False)
+    calendar_date = Column(Date, nullable=False, index=True)
+
+    start_timestamp_gmt = Column(DateTime)
+    start_timestamp_local = Column(DateTime)
+    end_timestamp_gmt = Column(DateTime)
+    end_timestamp_local = Column(DateTime)
+
+    wellness_activity_type = Column(String)  # "HEALTH_MONITORING"
+    notes = Column(Text)
+    rule_pk = Column(Integer)
+    user_profile_pk = Column(Integer)
+    device_meta_data = Column(JSON)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class HealthSnapshotSummaryStat(Base):
+    """Per-metric summary stat for a single Health Snapshot.
+
+    summary_type values: HEART_RATE, RESPIRATION, STRESS, SPO2, RMSSD_HRV, SDRR_HRV.
+    HEART_RATE / RESPIRATION / STRESS / SPO2 carry min/max/avg.
+    RMSSD_HRV / SDRR_HRV only carry avg_value (min/max are NULL).
+    """
+
+    __tablename__ = "health_snapshot_summaries"
+
+    user_id = Column(Integer, primary_key=True, nullable=False)
+    activity_uuid = Column(String, primary_key=True, nullable=False)
+    summary_type = Column(String, primary_key=True, nullable=False)
+
+    min_value = Column(Float)
+    max_value = Column(Float)
+    avg_value = Column(Float, nullable=False)
+
+
+class HealthSnapshotZoneTime(Base):
+    """Per-zone time-in-zone for a single Health Snapshot.
+
+    Each snapshot reports time spent in 6 heart-rate zones (0..5).
+    """
+
+    __tablename__ = "health_snapshot_zones"
+
+    user_id = Column(Integer, primary_key=True, nullable=False)
+    activity_uuid = Column(String, primary_key=True, nullable=False)
+    zone_number = Column(Integer, primary_key=True, nullable=False)
+
+    millis_in_zone = Column(Integer)
+    zone_low_boundary = Column(Integer)

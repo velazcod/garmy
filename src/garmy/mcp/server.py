@@ -480,7 +480,8 @@ def _register_sync_tool(mcp: FastMCP, config: MCPConfig) -> None:
                      Available: DAILY_SUMMARY, SLEEP, HEART_RATE, STEPS, STRESS,
                      BODY_BATTERY, HRV, CALORIES, RESPIRATION, TRAINING_READINESS,
                      ACTIVITIES, BODY_COMPOSITION, SPO2, RESTING_HEART_RATE,
-                     INTENSITY_MINUTES, FLOORS, TRAINING_STATUS, ENDURANCE_SCORE
+                     INTENSITY_MINUTES, FLOORS, TRAINING_STATUS, ENDURANCE_SCORE,
+                     HEALTH_SNAPSHOT
             user_id: User ID for database records (default: 1)
             resync_days: Force re-sync of the last N days even if already completed.
                          Useful for updating partial data from earlier syncs (default: 0, max: 7)
@@ -1196,6 +1197,9 @@ def _get_table_description(table_name: str) -> str:
         "activities": "Individual workouts and physical activities with performance metrics",
         "sync_status": "System table tracking data synchronization status (usually not needed for health analysis)",
         "performance_metrics": "Post-activity performance metrics: training load/status, endurance score (updated after activities, not daily)",
+        "health_snapshots": "Health Snapshot recordings — on-demand ~2-minute multi-metric measurements taken on a Garmin watch (HR, respiration, stress, SpO2, HRV). One row per snapshot with timing, device metadata, and calendar_date. Sparse — typically a handful per month.",
+        "health_snapshot_summaries": "Per-metric summary stats for each health snapshot. summary_type values: HEART_RATE, RESPIRATION, STRESS, SPO2 (each with min/max/avg) plus RMSSD_HRV, SDRR_HRV (avg only — min/max are NULL). Join to health_snapshots on (user_id, activity_uuid).",
+        "health_snapshot_zones": "Per-zone time-in-zone for each health snapshot. zone_number 0..5 with millis_in_zone (time spent in zone) and zone_low_boundary (HR threshold for the lower bound). Join to health_snapshots on (user_id, activity_uuid).",
     }
     return descriptions.get(table_name, "Health data table")
 
@@ -1238,6 +1242,17 @@ def _get_health_data_guide() -> str:
 **NOTE**: Updated after activities, not daily. Use "last known value" pattern:
 - Latest values: `SELECT * FROM performance_metrics WHERE user_id = 1 AND metric_date <= date('now') ORDER BY metric_date DESC LIMIT 1`
 - Training status trend: `SELECT metric_date, training_status, load_type FROM performance_metrics WHERE training_status IS NOT NULL ORDER BY metric_date`
+
+### health_snapshots / health_snapshot_summaries / health_snapshot_zones
+**WHAT**: Health Snapshot recordings — on-demand ~2-minute multi-metric measurements taken on a Garmin watch
+**CONTAINS**: HR, respiration, stress, SpO2 (min/max/avg) plus RMSSD/SDRR HRV (avg) plus per-zone time
+**JOIN KEY**: All three tables key on `(user_id, activity_uuid)`
+**NOTE**: These are sparse events (typically a few per month, when the user manually starts a snapshot on the watch). Sync via `sync_health_data` with `metrics='HEALTH_SNAPSHOT'`.
+**COMMON QUERIES**:
+- Recent snapshots: `SELECT calendar_date, start_timestamp_local FROM health_snapshots WHERE user_id = 1 ORDER BY calendar_date DESC LIMIT 10`
+- HRV trend across snapshots: `SELECT s.calendar_date, h.avg_value FROM health_snapshots s JOIN health_snapshot_summaries h USING (user_id, activity_uuid) WHERE h.summary_type = 'RMSSD_HRV' AND s.user_id = 1 ORDER BY s.calendar_date`
+- All metrics for one snapshot: `SELECT summary_type, min_value, max_value, avg_value FROM health_snapshot_summaries WHERE user_id = 1 AND activity_uuid = ?`
+- Snapshot HR zone time: `SELECT zone_number, millis_in_zone/1000.0 as seconds_in_zone, zone_low_boundary FROM health_snapshot_zones WHERE user_id = 1 AND activity_uuid = ? ORDER BY zone_number`
 
 ## Health Metrics Available
 - **Steps & Movement**: total_steps, total_distance_meters

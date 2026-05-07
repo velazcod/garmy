@@ -14,6 +14,9 @@ from .models import (
     BodyComposition,
     DailyHealthMetric,
     ExerciseSet,
+    HealthSnapshotRecord,
+    HealthSnapshotSummaryStat,
+    HealthSnapshotZoneTime,
     MetricType,
     PerformanceMetric,
     SyncStatus,
@@ -920,6 +923,106 @@ class HealthDB:
                     and_(
                         BodyComposition.user_id == user_id,
                         BodyComposition.sample_pk == sample_pk,
+                    )
+                )
+                .first()
+                is not None
+            )
+
+    def store_health_snapshot(
+        self,
+        user_id: int,
+        record: Dict[str, Any],
+        summaries: List[Dict[str, Any]],
+        zones: List[Dict[str, Any]],
+    ) -> None:
+        """Store a single Health Snapshot and its related summary/zone rows.
+
+        Uses session.merge() so re-syncing the same activity_uuid upserts.
+
+        Args:
+            user_id: User identifier.
+            record: Top-level snapshot dict (matches HealthSnapshotRecord columns,
+                without user_id which is added here).
+            summaries: List of 6 summary dicts (HealthSnapshotSummaryStat rows).
+            zones: List of 6 zone dicts (HealthSnapshotZoneTime rows).
+        """
+        activity_uuid = record.get("activity_uuid")
+        if not activity_uuid:
+            return
+
+        with self.get_session() as session:
+            def _parse_ts(value: Any) -> Optional[datetime]:
+                if value is None or isinstance(value, datetime):
+                    return value
+                if isinstance(value, str):
+                    try:
+                        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+                    except (ValueError, TypeError):
+                        return None
+                return None
+
+            cal_date = record.get("calendar_date")
+            if isinstance(cal_date, str):
+                try:
+                    cal_date = date.fromisoformat(cal_date)
+                except (ValueError, TypeError):
+                    cal_date = None
+
+            snap = HealthSnapshotRecord(
+                user_id=user_id,
+                activity_uuid=activity_uuid,
+                calendar_date=cal_date,
+                start_timestamp_gmt=_parse_ts(record.get("start_timestamp_gmt")),
+                start_timestamp_local=_parse_ts(record.get("start_timestamp_local")),
+                end_timestamp_gmt=_parse_ts(record.get("end_timestamp_gmt")),
+                end_timestamp_local=_parse_ts(record.get("end_timestamp_local")),
+                wellness_activity_type=record.get("wellness_activity_type"),
+                notes=record.get("notes"),
+                rule_pk=record.get("rule_pk"),
+                user_profile_pk=record.get("user_profile_pk"),
+                device_meta_data=record.get("device_meta_data"),
+            )
+            session.merge(snap)
+
+            for s in summaries:
+                if s.get("activity_uuid") != activity_uuid:
+                    continue
+                session.merge(
+                    HealthSnapshotSummaryStat(
+                        user_id=user_id,
+                        activity_uuid=activity_uuid,
+                        summary_type=s.get("summary_type", ""),
+                        min_value=s.get("min_value"),
+                        max_value=s.get("max_value"),
+                        avg_value=s.get("avg_value", 0.0),
+                    )
+                )
+
+            for z in zones:
+                if z.get("activity_uuid") != activity_uuid:
+                    continue
+                session.merge(
+                    HealthSnapshotZoneTime(
+                        user_id=user_id,
+                        activity_uuid=activity_uuid,
+                        zone_number=z.get("zone_number", 0),
+                        millis_in_zone=z.get("millis_in_zone", 0),
+                        zone_low_boundary=z.get("zone_low_boundary", 0),
+                    )
+                )
+
+            session.commit()
+
+    def health_snapshot_exists(self, user_id: int, activity_uuid: str) -> bool:
+        """Check if a Health Snapshot with this activity_uuid is already stored."""
+        with self.get_session() as session:
+            return (
+                session.query(HealthSnapshotRecord)
+                .filter(
+                    and_(
+                        HealthSnapshotRecord.user_id == user_id,
+                        HealthSnapshotRecord.activity_uuid == activity_uuid,
                     )
                 )
                 .first()

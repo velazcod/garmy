@@ -137,14 +137,19 @@ class SyncManager:
             metrics = list(MetricType)
 
         # Separate special metrics from regular date-by-date metrics
-        # Activities and body composition are handled separately
+        # Activities, body composition, and health snapshots are handled separately
         non_activities_metrics = [
             m
             for m in metrics
-            if m not in (MetricType.ACTIVITIES, MetricType.BODY_COMPOSITION)
+            if m not in (
+                MetricType.ACTIVITIES,
+                MetricType.BODY_COMPOSITION,
+                MetricType.HEALTH_SNAPSHOT,
+            )
         ]
         has_activities = MetricType.ACTIVITIES in metrics
         has_body_composition = MetricType.BODY_COMPOSITION in metrics
+        has_health_snapshot = MetricType.HEALTH_SNAPSHOT in metrics
 
         # Calculate total tasks for progress reporting
         total_tasks = date_count * len(non_activities_metrics)
@@ -152,6 +157,8 @@ class SyncManager:
             total_tasks += date_count
         if has_body_composition:
             total_tasks += 1  # Body composition is a single batch operation
+        if has_health_snapshot:
+            total_tasks += 1  # Health snapshots is a single batch operation
 
         self.progress.start_sync(total_tasks)
 
@@ -188,6 +195,10 @@ class SyncManager:
             # Sync body composition (single batch for entire range)
             if has_body_composition:
                 self._sync_body_composition_batch(user_id, start_date, end_date, stats)
+
+            # Sync health snapshots (single batch for entire range)
+            if has_health_snapshot:
+                self._sync_health_snapshot_batch(user_id, start_date, end_date, stats)
 
         except Exception as e:
             raise
@@ -528,6 +539,77 @@ class SyncManager:
 
         except Exception as e:
             self.progress.error(f"Body composition sync failed: {e}")
+            stats["failed"] += 1
+
+    def _sync_health_snapshot_batch(
+        self, user_id: int, start_date: date, end_date: date, stats: Dict[str, int]
+    ) -> None:
+        """Sync Health Snapshots for entire date range via the GraphQL accessor.
+
+        Health Snapshots use a GraphQL POST endpoint that accepts a date range
+        directly (capped at ~31 days per call; the accessor auto-chunks).
+
+        Args:
+            user_id: User identifier
+            start_date: Start of sync range (inclusive)
+            end_date: End of sync range (inclusive)
+            stats: Stats dictionary to update
+        """
+        if not self.api_client:
+            self.progress.error("API client not initialized")
+            stats["failed"] += 1
+            return
+
+        try:
+            self.progress.info(
+                f"Syncing health snapshots for {start_date} to {end_date}"
+            )
+
+            snapshots = self.api_client.health_snapshots.range(start_date, end_date)
+
+            if not snapshots:
+                self.progress.info("No health snapshots found in range")
+                return
+
+            extracted = self.extractor.extract_health_snapshots(snapshots)
+            records = extracted.get("records", [])
+            summaries = extracted.get("summaries", [])
+            zones = extracted.get("zones", [])
+
+            stored = 0
+            skipped = 0
+            for record in records:
+                activity_uuid = record.get("activity_uuid")
+                if not activity_uuid:
+                    continue
+
+                if self.db.health_snapshot_exists(user_id, activity_uuid):
+                    skipped += 1
+                    continue
+
+                snap_summaries = [
+                    s for s in summaries if s.get("activity_uuid") == activity_uuid
+                ]
+                snap_zones = [
+                    z for z in zones if z.get("activity_uuid") == activity_uuid
+                ]
+
+                self.db.store_health_snapshot(
+                    user_id, record, snap_summaries, snap_zones
+                )
+                stored += 1
+
+            stats["completed"] += stored
+            stats["skipped"] += skipped
+
+            self.progress.info(
+                f"Health snapshots: stored {stored}, skipped {skipped} existing"
+            )
+
+            time.sleep(self.config.sync.rate_limit_delay)
+
+        except Exception as e:
+            self.progress.error(f"Health snapshot sync failed: {e}")
             stats["failed"] += 1
 
     def backfill_activity_details(

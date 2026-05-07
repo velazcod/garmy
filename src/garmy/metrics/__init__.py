@@ -90,6 +90,11 @@ from .body_battery import BodyBattery
 from .calories import Calories
 from .daily_summary import DailySummary
 from .floors import Floors
+from .health_snapshot import (
+    HealthSnapshot,
+    HealthSnapshotSummary,
+    HealthSnapshotZone,
+)
 from .heart_rate import HeartRate
 from .hrv import HRV
 from .intensity_minutes import IntensityMinutes
@@ -111,6 +116,9 @@ __all__: List[str] = [
     "BodyBattery",
     "Calories",
     "DailySummary",
+    "HealthSnapshot",
+    "HealthSnapshotSummary",
+    "HealthSnapshotZone",
     "HeartRate",
     "IntensityMinutes",
     "Respiration",

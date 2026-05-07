@@ -702,6 +702,81 @@ class DataExtractor:
             "avg_pace_min_km": avg_pace_min_km,
         }
 
+    def extract_health_snapshots(
+        self, snapshots: List[Any]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Extract DB-ready rows for the three Health Snapshot tables.
+
+        Args:
+            snapshots: List of HealthSnapshot dataclass instances (from
+                APIClient.health_snapshots.range / latest / for_date).
+
+        Returns:
+            Dict with three keys:
+              - "records":   one dict per snapshot, for the health_snapshots table
+              - "summaries": 6 dicts per snapshot, for health_snapshot_summaries
+              - "zones":     6 dicts per snapshot, for health_snapshot_zones
+
+            All dicts are keyed by activity_uuid (caller adds user_id).
+        """
+        records: List[Dict[str, Any]] = []
+        summaries: List[Dict[str, Any]] = []
+        zones: List[Dict[str, Any]] = []
+
+        for snap in snapshots:
+            uuid = getattr(snap, "activity_uuid", None)
+            if not uuid:
+                continue
+
+            cal_date = getattr(snap, "calendar_date_obj", None)
+            if cal_date is None:
+                date_str = getattr(snap, "calendar_date", "")
+                try:
+                    cal_date = date.fromisoformat(date_str) if date_str else None
+                except (ValueError, TypeError):
+                    cal_date = None
+
+            records.append(
+                {
+                    "activity_uuid": uuid,
+                    "calendar_date": cal_date,
+                    "start_timestamp_gmt": getattr(snap, "start_timestamp_gmt", None),
+                    "start_timestamp_local": getattr(snap, "start_timestamp_local", None),
+                    "end_timestamp_gmt": getattr(snap, "end_timestamp_gmt", None),
+                    "end_timestamp_local": getattr(snap, "end_timestamp_local", None),
+                    "wellness_activity_type": getattr(
+                        snap, "wellness_activity_type", None
+                    ),
+                    "notes": getattr(snap, "notes", None),
+                    "rule_pk": getattr(snap, "rule_pk", None),
+                    "user_profile_pk": getattr(snap, "user_profile_pk", None),
+                    "device_meta_data": getattr(snap, "device_meta_data", None),
+                }
+            )
+
+            for summary in getattr(snap, "summaries", []) or []:
+                summaries.append(
+                    {
+                        "activity_uuid": uuid,
+                        "summary_type": getattr(summary, "summary_type", ""),
+                        "min_value": getattr(summary, "min_value", None),
+                        "max_value": getattr(summary, "max_value", None),
+                        "avg_value": getattr(summary, "avg_value", 0.0),
+                    }
+                )
+
+            for zone in getattr(snap, "time_in_zone", []) or []:
+                zones.append(
+                    {
+                        "activity_uuid": uuid,
+                        "zone_number": getattr(zone, "zone_number", 0),
+                        "millis_in_zone": getattr(zone, "millis_in_zone", 0),
+                        "zone_low_boundary": getattr(zone, "zone_low_boundary", 0),
+                    }
+                )
+
+        return {"records": records, "summaries": summaries, "zones": zones}
+
     def _extract_body_composition_data(self, data: Dict) -> List[Dict[str, Any]]:
         """Extract body composition entries from weight service response.
 
