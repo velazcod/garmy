@@ -317,6 +317,10 @@ def create_mcp_server(config: Optional[MCPConfig] = None) -> FastMCP:
 
         IMPORTANT: Only SELECT and WITH queries are allowed for security.
 
+        Column names are non-obvious (daily_health_metrics alone has 50+ columns) —
+        call get_table_details(table_name) to confirm exact names before querying;
+        do NOT guess.
+
         Args:
             query: SQL SELECT query (e.g., "SELECT metric_date, total_steps FROM daily_health_metrics WHERE user_id = 1")
             params: Optional list of parameters for ? placeholders in query
